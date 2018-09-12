@@ -73,6 +73,10 @@ class Basis(object):
             raise RuntimeError("Unknown statistics " + self._stat)
 
     @property
+    def beta(self):
+        return self._beta
+
+    @property
     def statistics(self):
         return self._b.statistics
 
@@ -117,3 +121,46 @@ class Basis(object):
         for i in range(num_n):
             Unl[i, :] = self._Unl_cache[nvec[i]]
         return Unl
+
+def sampling_points_matsubara(basis_beta, whichl):
+    basis = basis_beta.basis_xy
+    stat = basis.statistics
+    beta = basis_beta.beta
+
+    assert stat == 'F' or stat == 'B' or stat == 'barB'
+
+    if stat == 'barB':
+        if whichl < 2:
+            raise RuntimeError("whichl < 2!")
+
+    x1 = numpy.arange(1000)
+    x2 = numpy.array(numpy.exp(numpy.linspace(numpy.log(1000), numpy.log(1E+8), 1000)), dtype=int)
+    x = numpy.unique(numpy.hstack((x1,x2)))
+    unl = basis.compute_unl(x)
+
+    shift = 0 if stat=='F' else 1
+    if (whichl+shift)%2 == 0:
+        y = numpy.sqrt(beta)*unl[:,whichl].imag
+    else:
+        y = numpy.sqrt(beta)*unl[:,whichl].real
+
+    sign_change = [(x[i], x[i+1], y[i+1], i) for i in range(len(x)-1) if y[i] * y[i+1] <= 0]
+
+    zeros = numpy.array([0.5*(p[0]+p[1]) for p in sign_change])
+
+    zero_mids = numpy.array([0.5*(zeros[i]+zeros[i+1]) for i in range(len(zeros)-1)], dtype=int)
+
+    # Find the point where abs(y) takes a maximum value after the last sign change.
+    one_after_last_sign_change = sign_change[-1][3]
+    last_sampling_point = x[one_after_last_sign_change + numpy.argmax(numpy.abs(y[one_after_last_sign_change:]))]
+
+    sp_half = numpy.hstack(([0], zero_mids, [last_sampling_point]))
+
+    if stat == 'F':
+        r = numpy.sort(numpy.hstack((sp_half, -sp_half-1)))
+    else:
+        r = numpy.unique(numpy.hstack((sp_half, -sp_half)))
+
+    #assert len(r) >= whichl+1
+
+    return r

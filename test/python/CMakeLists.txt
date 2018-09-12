@@ -16,7 +16,7 @@ foreach(testfile ${TEST_FILES})
     configure_file(${testfile} ${CMAKE_BINARY_DIR}/test/python COPYONLY)
 endforeach()
 
-set(python_test_src  two_point_basis_test three_point_ph_test)
+set(python_test_src  two_point_basis_test three_point_ph_test sampling_test)
 foreach(test ${python_test_src})
     add_python_test(${test})
 endforeach(test)

@@ -1,6 +1,7 @@
 from __future__ import print_function
 import numpy
 import scipy
+import scipy.linalg
 
 from two_point_basis import *
 
@@ -61,6 +62,15 @@ def _eigh_ordered(mat):
         evals2[ie]=evals[idx[ie]]
         evecs2[:,ie]=1.0*evecs[:,idx[ie]]
     return evals2,evecs2
+
+def from_complex_to_real_coeff_matrix(A):
+    (N1, N2) = A.shape
+    A_big = numpy.zeros((2,N1,2,N2), dtype=float)
+    A_big[0,:,0,:] =  A.real
+    A_big[0,:,1,:] = -A.imag
+    A_big[1,:,0,:] =  A.imag
+    A_big[1,:,1,:] =  A.real
+    return A_big.reshape((2*N1, 2*N2))
 
 def Gl_pole(B, pole):
     assert isinstance(B, Basis)
