@@ -1,5 +1,8 @@
+from __future__ import print_function
 import numpy
 import scipy
+
+from two_point_basis import *
 
 def _my_mod(t, beta):
     t_new = t
@@ -58,3 +61,21 @@ def _eigh_ordered(mat):
         evals2[ie]=evals[idx[ie]]
         evecs2[:,ie]=1.0*evecs[:,idx[ie]]
     return evals2,evecs2
+
+def Gl_pole(B, pole):
+    assert isinstance(B, Basis)
+
+    Sl = numpy.array([B.Sl(l) for l in range(B.dim())])
+
+    if B.statistics == 'F':
+        Vlpole = numpy.array([B.Vlomega(l, pole) for l in range(B.dim())])
+        return - Sl * Vlpole
+    elif B.statistics == 'B':
+        assert pole != 0
+        Vlpole = numpy.array([B.Vlomega(l, pole) for l in range(B.dim())])
+        return - Sl * Vlpole/pole
+    elif B.statistics == 'barB':
+        assert pole != 0
+        Vlpole = numpy.zeros((B.dim()))
+        Vlpole[2:] = numpy.sqrt(1/B.wmax) * numpy.array([B.basis_xy.basis_b.vly(l, pole/B.wmax) for l in range(B.dim()-2)])
+        return - Sl * Vlpole/pole
