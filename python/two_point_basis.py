@@ -10,7 +10,7 @@ def _compute_Tnl_norm_legendre(n, l):
         if n == 0:
             return 0
         else:
-            return numpy.sqrt(3.)* numpy.exp(1J*numpy.pi*n) * (numpy.cos(n*numpy.pi))/(1J*numpy.pi*n)
+            return numpy.sqrt(3.) / (1J*numpy.pi*n)
     else:
         raise RuntimeError("l > 1")
 
@@ -129,9 +129,12 @@ def sampling_points_matsubara(basis_beta, whichl):
 
     assert stat == 'F' or stat == 'B' or stat == 'barB'
 
+    whichl_t = whichl
     if stat == 'barB':
-        if whichl < 2:
-            raise RuntimeError("whichl < 2!")
+        whichl_t = whichl + 2
+
+    if whichl_t > basis_beta.dim():
+        raise RuntimeError("Too large whichl")
 
     x1 = numpy.arange(1000)
     x2 = numpy.array(numpy.exp(numpy.linspace(numpy.log(1000), numpy.log(1E+8), 1000)), dtype=int)
@@ -139,10 +142,10 @@ def sampling_points_matsubara(basis_beta, whichl):
     unl = basis.compute_unl(x)
 
     shift = 0 if stat=='F' else 1
-    if (whichl+shift)%2 == 0:
-        y = numpy.sqrt(beta)*unl[:,whichl].imag
+    if (whichl_t+shift)%2 == 0:
+        y = numpy.sqrt(beta)*unl[:,whichl_t].imag
     else:
-        y = numpy.sqrt(beta)*unl[:,whichl].real
+        y = numpy.sqrt(beta)*unl[:,whichl_t].real
 
     sign_change = [(x[i], x[i+1], y[i+1], i) for i in range(len(x)-1) if y[i] * y[i+1] <= 0]
 
@@ -155,12 +158,9 @@ def sampling_points_matsubara(basis_beta, whichl):
     last_sampling_point = x[one_after_last_sign_change + numpy.argmax(numpy.abs(y[one_after_last_sign_change:]))]
 
     sp_half = numpy.hstack(([0], zero_mids, [last_sampling_point]))
-
     if stat == 'F':
         r = numpy.sort(numpy.hstack((sp_half, -sp_half-1)))
     else:
         r = numpy.unique(numpy.hstack((sp_half, -sp_half)))
-
-    #assert len(r) >= whichl+1
 
     return r
