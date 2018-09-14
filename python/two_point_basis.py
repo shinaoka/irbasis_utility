@@ -55,7 +55,7 @@ class augmented_basis_b(object):
         return self._dim
 
 class Basis(object):
-    def __init__(self, b, beta):
+    def __init__(self, b, beta, cutoff=1e-15):
         self._Lambda = b.Lambda
         self._wmax = self._Lambda/beta
         self._stat = b.statistics
@@ -64,6 +64,8 @@ class Basis(object):
         self._scale = numpy.sqrt(2/beta)
         self._scale2 = numpy.sqrt(1/self._wmax)
         self._Unl_cache = {}
+
+        self._dim = numpy.sum([self._b.sl(l) /self._b.sl(0) > cutoff for l in range(self._b.dim())])
 
         if self._stat == 'F':
             self._sl_const = numpy.sqrt(0.5 * beta * self._wmax)
@@ -89,7 +91,7 @@ class Basis(object):
         return self._wmax
 
     def dim(self):
-        return self._b.dim()
+        return self._dim
 
     def Sl(self, l):
         return self._sl_const * self._b.sl(l)
@@ -112,7 +114,7 @@ class Basis(object):
             return
         unl = self._b.compute_unl(nvec_compt)
         for i in range(len(nvec_compt)):
-            self._Unl_cache[nvec_compt[i]] = numpy.sqrt(self._beta) * unl[i,:]
+            self._Unl_cache[nvec_compt[i]] = numpy.sqrt(self._beta) * unl[i,:self._dim]
 
     def compute_Unl(self, nvec):
         self._precompute_Unl(nvec)
