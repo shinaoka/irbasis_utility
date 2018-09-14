@@ -73,7 +73,7 @@ class TestMethods(unittest.TestCase):
         boson_freq = 10
         Lambda = 10.0
         beta = 0.2
-        alpha = 1e-8
+        alpha = 1e-10
         augmented = False
 
         wmax = Lambda/beta
@@ -93,6 +93,9 @@ class TestMethods(unittest.TestCase):
         prj_check = phb.projector_to_matsubara_vec(n1n2_check)
         S = phb.normalized_S()
 
+        #for n1n2 in sp:
+            #print("sp ", n1n2[0], n1n2[1])
+
         # r = 0: Fermion, Fermion
         # r = 1: Boson, Fermion
         # r = 2: Boson, Fermion
@@ -100,25 +103,16 @@ class TestMethods(unittest.TestCase):
             for s1, s2 in product(range(2), repeat=2):
                 coeffs_ref = _compute_Gl(phb, pole, s1, s2, r)
                 Giwn = numpy.array([_compute_Giw(phb, pole, s1, s2, r, n1n2[0], n1n2[1], boson_freq) for n1n2 in sp])
-                prj = numpy.array(phb.projector_to_matsubara_vec(sp))
 
-                prj_rho = prj[:, :,:,:,:,:] * S[None, :,:,:,:,:]
-
-                #prj_mat = prj.reshape((n_sp, 3*2*2*Nl*Nl))
-                #coeffs = ridge_complex(prj_mat, Giwn, alpha).reshape((3,2,2,Nl,Nl))
+                S[:,:,:,:,:] = 1
+                prj_rho = numpy.array(phb.projector_to_matsubara_vec(sp)) * S[None, :,:,:,:,:]
 
                 prj_rho_mat = prj_rho[:,r,s1,s2,:,:].reshape((n_sp, Nl*Nl))
                 coeffs_rho = ridge_complex(prj_rho_mat, Giwn, alpha).reshape((Nl,Nl))
-                coeffs = coeffs_rho[:,:] * S[r,s1,s2,:,:]
+                coeffs = coeffs_rho * S[r,s1,s2,:,:]
 
-                print(r, s1, s2, "res=", numpy.amax(numpy.abs(Giwn - numpy.dot(prj_rho_mat,coeffs_rho.reshape((Nl*Nl))))))
-
-                #prj_rho_mat = prj_rho.reshape((n_sp, 3*2*2*Nl*Nl))
-                #coeffs_rho = ridge_complex(prj_rho_mat, Giwn, alpha).reshape((3,2,2,Nl,Nl))
-                #coeffs = coeffs_rho[:,:] * S[:,:,:,:,:]
-
-                Giwn_check_ref = numpy.array([_compute_Giw(phb, pole, s1, s2, r, n1n2[0], n1n2[1], boson_freq) for n1n2 in n1n2_check])
-                Giwn_check = numpy.array([numpy.sum(p * coeffs) for p in prj_check])
+                #Giwn_check_ref = numpy.array([_compute_Giw(phb, pole, s1, s2, r, n1n2[0], n1n2[1], boson_freq) for n1n2 in n1n2_check])
+                #Giwn_check = numpy.array([numpy.sum(p * coeffs) for p in prj_check])
                 #print(Giwn_check_ref, Giwn_check)
                 #idx = 0
                 #for i in range(-niw,niw):
@@ -128,12 +122,12 @@ class TestMethods(unittest.TestCase):
                     #print("")
 
                 #for r,s1,s2 in product(range(3), range(2), range(2)):
-                    #print("# ", r, s1, s2)
-                #for i in range(Nl):
-                    #for j in range(Nl):
-                        #print(i, j, numpy.abs(coeffs[i,j]), numpy.abs(coeffs_ref[r,s1,s2,i,j]))
-                    #print("")
-                print(r, s1, s2, numpy.amax(numpy.abs(coeffs-coeffs_ref[r,s1,s2,:,:])))
+                print("# ", r, s1, s2)
+                for i in range(Nl):
+                    for j in range(Nl):
+                        print(i, j, numpy.abs(coeffs[i,j]), numpy.abs(coeffs_ref[r,s1,s2,i,j]))
+                    print("")
+                #print(r, s1, s2, numpy.amax(numpy.abs(coeffs-coeffs_ref[r,s1,s2,:,:])))
 
 if __name__ == '__main__':
     unittest.main()

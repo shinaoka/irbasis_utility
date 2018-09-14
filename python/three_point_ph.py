@@ -118,8 +118,8 @@ class ThreePointPHBasis(object):
                 sp.append((sp_f[i] - s1 * self._m, sp_f[j] - s2 * self._m))
 
                 # Boson, Fermion
-                n2 = sp_b[i] - s2 * self._m
-                n1 = sp_f[i] - s1 * self._m + _sign(s1) * n2
+                n2 = sp_f[j] - s2 * self._m
+                n1 = sp_b[i] - s1 * self._m + _sign(s1) * n2
 
                 sp.append((n1, n2))
                 sp.append((n2, n1))
