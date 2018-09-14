@@ -115,7 +115,7 @@ class ThreePointPHBasis(object):
         for s1, s2 in product(range(2), repeat=2):
             for i, j in product(range(Nl), repeat=2):
                 # Fermion, Fermion
-                sp.append((sp_f[i], sp_f[j]))
+                sp.append((sp_f[i] - s1 * self._m, sp_f[j] - s2 * self._m))
 
                 # Boson, Fermion
                 n2 = sp_b[i] - s2 * self._m
