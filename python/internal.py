@@ -3,7 +3,7 @@ import numpy
 import scipy
 import scipy.linalg
 
-from two_point_basis import *
+from .two_point_basis import *
 
 def _my_mod(t, beta):
     t_new = t

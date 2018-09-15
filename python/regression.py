@@ -3,7 +3,7 @@ from __future__ import print_function
 import numpy
 import scipy
 import scipy.linalg
-from sklearn.linear_model import Ridge
+#from sklearn.linear_model import Ridge
 
 def ridge_svd(X, y, alpha, cutoff = 1e-10):
     N1, N2 = X.shape

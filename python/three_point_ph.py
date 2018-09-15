@@ -4,16 +4,16 @@ import scipy
 import scipy.linalg
 from irbasis import *
 from itertools import product
-from internal import *
-from two_point_basis import *
+from .internal import *
+from .two_point_basis import *
 
 def _sign(s):
     return 1 if s%2 == 0 else -1
 
-def _A_imp(u1, u2, Nl):
-    mat1 = numpy.array([u1(l) for l in range(Nl)])
-    mat2 = numpy.array([u2(l) for l in range(Nl)])
-    return numpy.einsum('i,j->ij', mat1, mat2)
+#def _A_imp(u1, u2, Nl):
+    #mat1 = numpy.array([u1(l) for l in range(Nl)])
+    #mat2 = numpy.array([u2(l) for l in range(Nl)])
+    #return numpy.einsum('i,j->ij', mat1, mat2)
 
 class ThreePointPHBasis(object):
     def __init__(self, boson_freq, Lambda, beta, cutoff = 1e-8, augmented=True):
@@ -111,12 +111,15 @@ class ThreePointPHBasis(object):
         sp_b = sampling_points_matsubara(self._Bb, whichl)
 
         sp = []
-        
+
+        Nf = len(sp_f)
+        Nb = len(sp_b)
         for s1, s2 in product(range(2), repeat=2):
-            for i, j in product(range(Nl), repeat=2):
+            for i, j in product(range(Nf), repeat=2):
                 # Fermion, Fermion
                 sp.append((sp_f[i] - s1 * self._m, sp_f[j] - s2 * self._m))
 
+            for i, j in product(range(Nb), range(Nf)):
                 # Boson, Fermion
                 n2 = sp_f[j] - s2 * self._m
                 n1 = sp_b[i] - s1 * self._m + _sign(s1) * n2
@@ -124,7 +127,7 @@ class ThreePointPHBasis(object):
                 sp.append((n1, n2))
                 sp.append((n2, n1))
 
-        return sp
+        return list(set(sp))
 
     def _get_Usnl_f(self, s, n):
         return self._Bf.compute_Unl([n + s * self._m])[:,0:self._Nl].reshape((self._Nl))

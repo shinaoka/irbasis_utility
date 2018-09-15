@@ -15,6 +15,9 @@ def _compute_Tnl_norm_legendre(n, l):
         raise RuntimeError("l > 1")
 
 class augmented_basis_b(object):
+    """
+    Augmented basis for boson (in terms of x, y)
+    """
     def __init__(self, Lambda):
         self._bb = irbasis.load('B', Lambda)
         self._dim = self._bb.dim() + 2
@@ -55,6 +58,9 @@ class augmented_basis_b(object):
         return self._dim
 
 class Basis(object):
+    """
+    Basis for two-point Green's function in terms of tau and omega
+    """
     def __init__(self, b, beta, cutoff=1e-15):
         self._Lambda = b.Lambda
         self._wmax = self._Lambda/beta
@@ -93,6 +99,10 @@ class Basis(object):
     def dim(self):
         return self._dim
 
+    @property
+    def max_l(self):
+        return self._b.dim()-1
+
     def Sl(self, l):
         return self._sl_const * self._b.sl(l)
 
@@ -125,6 +135,9 @@ class Basis(object):
         return Unl
 
 def sampling_points_matsubara(basis_beta, whichl):
+    """
+    Return "optimal" sampling points in Matsubara domain for given basis
+    """
     basis = basis_beta.basis_xy
     stat = basis.statistics
     beta = basis_beta.beta
@@ -135,7 +148,7 @@ def sampling_points_matsubara(basis_beta, whichl):
     if stat == 'barB':
         whichl_t = whichl + 2
 
-    if whichl_t > basis_beta.dim():
+    if whichl_t > basis_beta.max_l:
         raise RuntimeError("Too large whichl")
 
     x1 = numpy.arange(1000)
