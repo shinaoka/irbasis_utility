@@ -3,7 +3,7 @@ import unittest
 import numpy
 import irbasis
 
-from irbasis_utility.two_point_basis import *
+from irbasis_util.two_point_basis import *
 
 Lambda = 1000.0
 beta = 100.0

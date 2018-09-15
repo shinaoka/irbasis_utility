@@ -3,10 +3,10 @@ import unittest
 import numpy
 import irbasis
 
-from irbasis_utility.two_point_basis import *
-from irbasis_utility.three_point_ph import *
-from irbasis_utility.internal import *
-from irbasis_utility.regression import *
+from irbasis_util.two_point_basis import *
+from irbasis_util.three_point_ph import *
+from irbasis_util.internal import *
+from irbasis_util.regression import *
 
 def _compute_Gl(phb, pole, s1, s2, r):
     Nl = phb.Nl

@@ -6,9 +6,9 @@ endfunction(add_python_test)
 find_package(PythonInterp REQUIRED)
 
 # Copy all library files
-file(GLOB_RECURSE LIB_FILES "${CMAKE_SOURCE_DIR}/python/*.py")
+file(GLOB_RECURSE LIB_FILES RELATIVE ${CMAKE_SOURCE_DIR}/python "${CMAKE_SOURCE_DIR}/python/*.py")
 foreach(libfile ${LIB_FILES})
-    configure_file(${libfile} ${CMAKE_BINARY_DIR}/test/python/irbasis_utility/ COPYONLY)
+    configure_file(${CMAKE_SOURCE_DIR}/python/${libfile} ${CMAKE_BINARY_DIR}/test/python/irbasis_util/${libfile} COPYONLY)
 endforeach()
 
 # copy test files

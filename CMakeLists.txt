@@ -1,7 +1,7 @@
 cmake_minimum_required (VERSION 2.8.12)
 
 # use only Python
-project (irbasis_utility NONE)
+project (irbasis_util NONE)
 
 # Print build type
 if(NOT CMAKE_BUILD_TYPE)

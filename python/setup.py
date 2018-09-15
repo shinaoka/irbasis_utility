@@ -12,7 +12,7 @@ with open(path.join(here, 'README.md'), encoding='utf-8') as f:
 
 
 setup(
-    name='irbasis_utility',
+    name='irbasis utility',
 
     version='0.2',
 
