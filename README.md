@@ -1,6 +1,7 @@
 irbasis utility
 ======
 Utility library for irbasis: support for two-point Green's function, three-point Green's function
+This software is released under the MIT License, see LICENSE.txt. 
 
 ## How to build tests & install via pip
 
