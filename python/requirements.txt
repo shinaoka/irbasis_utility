@@ -1,2 +1,2 @@
 scipy
-irbasis
+irbasis>=1.0.2

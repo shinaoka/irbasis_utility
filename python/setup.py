@@ -56,5 +56,5 @@ setup(
 
     packages = find_packages(exclude=['contrib', 'docs', 'tests']),
 
-    install_requires=['scipy', 'irbasis'],
+    install_requires=['scipy', 'irbasis>=1.0.2'],
 )

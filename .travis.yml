@@ -1,0 +1,40 @@
+language: python
+sudo: required
+dist: trusty
+
+python:
+    - 2.7
+    - 3.4
+    - 3.5
+    - 3.6
+
+branches:
+  only:
+    - master
+    - travis # To debug .travis.yml
+
+addons:
+  apt:
+    packages:
+      - libhdf5-serial-dev
+
+install:
+  - pip install -r python/requirements.txt
+
+script:
+  # Stop on first error
+  - set -e
+
+  # Build, test irbasis
+  - cd $TRAVIS_BUILD_DIR/..
+  - mkdir build
+  - cd build
+  - |
+    cmake ../irbasis_utility  \
+    -DCMAKE_BUILD_TYPE=Debug
+  - make
+  - export CTEST_OUTPUT_ON_FAILURE=1
+  - make test
+  - python setup.py bdist_wheel
+  - cd dist
+  - pip install *.whl
