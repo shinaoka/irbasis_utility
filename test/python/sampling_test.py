@@ -26,8 +26,7 @@ class TestMethods(unittest.TestCase):
             whichl = dim-1
             sp = sampling_points_matsubara(b, whichl)
 
-            # just for debug
-            Unl = b.compute_Unl(sp)[:,2:dim]
+            Unl = b.compute_Unl(sp)[:,:dim]
             Unl_real = from_complex_to_real_coeff_matrix(Unl)
             U, S, Vh = scipy.linalg.svd(Unl_real, full_matrices=False)
             cond_num = S[0]/S[-1]
