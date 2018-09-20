@@ -17,6 +17,8 @@ addons:
   apt:
     packages:
       - libhdf5-serial-dev
+    config:
+      retries: true
 
 install:
   - pip install -r python/requirements.txt
