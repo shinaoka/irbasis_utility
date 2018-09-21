@@ -24,7 +24,7 @@ setup(
 
     url='https://github.com/SpM-lab/irbasis_utility',
 
-    author='Hiroshi Shinaoka',
+    author='Hiroshi Shinaoka, Markus Wallerberger, Dominique Geffroy',
 
     author_email='h.shinaoka@gmail.com', 
 

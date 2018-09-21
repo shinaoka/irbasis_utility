@@ -3,6 +3,8 @@ import numpy
 import scipy
 import irbasis
 
+from .internal import *
+
 def _compute_Tnl_norm_legendre(n, l):
     if l==0:
         return 1 if n == 0 else 0
@@ -18,8 +20,18 @@ class augmented_basis_b(object):
     """
     Augmented basis for boson (in terms of x, y)
     """
-    def __init__(self, Lambda):
-        self._bb = irbasis.load('B', Lambda)
+    def __init__(self, basis_xy):
+        """
+        Contructs an object representing augmented basis for boson
+
+        Parameters
+        ----------
+        basis_xy: object of irbasis (boson)
+        """
+        check_type(basis_xy, irbasis.basis)
+        check_value(basis_xy.statistics, 'B')
+
+        self._bb = basis_xy
         self._dim = self._bb.dim() + 2
 
     @property
@@ -33,6 +45,14 @@ class augmented_basis_b(object):
     @property
     def statistics(self):
         return 'barB'
+
+    def ulx(self, l, x):
+        if l == 0:
+            return numpy.sqrt(0.5)
+        elif l == 1:
+            return numpy.sqrt(1.5) * x
+        else:
+            return self._bb.ulx(l-2, x)
 
     def ulx_all_l(self, x):
         r = numpy.zeros((dim_))
@@ -62,6 +82,9 @@ class Basis(object):
     Basis for two-point Green's function in terms of tau and omega
     """
     def __init__(self, b, beta, cutoff=1e-15):
+        check_type(b, [irbasis.basis, augmented_basis_b])
+        check_type(beta, [float])
+
         self._Lambda = b.Lambda
         self._wmax = self._Lambda/beta
         self._stat = b.statistics
@@ -96,6 +119,7 @@ class Basis(object):
     def wmax(self):
         return self._wmax
 
+    @property
     def dim(self):
         return self._dim
 
@@ -107,15 +131,20 @@ class Basis(object):
         return self._sl_const * self._b.sl(l)
 
     def Ultau(self, l, tau):
+        check_type(l, [int])
+        check_type(tau, [float])
         return self._scale * self._b.ulx(l, 2*tau/self._beta-1)
 
     def Ultau_all_l(self, tau):
-        t, s = _my_mod(tau, self._beta) 
+        check_type(tau, [float])
+        t, s = _my_mod(tau, self._beta)
         x = 2 * t / self._beta - 1
         sign = s if self._statistics == 'F' else 1
         return sign * self._scale * self._b.ulx_all_l(x)
 
     def Vlomega(self, l, omega):
+        check_type(l, [int])
+        check_type(omega, [float])
         return self._scale2 * self._b.vly(l, omega/self._wmax)
 
     def _precompute_Unl(self, nvec):
@@ -129,15 +158,60 @@ class Basis(object):
     def compute_Unl(self, nvec):
         self._precompute_Unl(nvec)
         num_n = len(nvec)
-        Unl = numpy.empty((num_n, self.dim()), dtype=complex)
+        Unl = numpy.empty((num_n, self.dim), dtype=complex)
         for i in range(num_n):
             Unl[i, :] = self._Unl_cache[nvec[i]]
         return Unl
 
+def sampling_points_leggauss(basis_beta, whichl, deg):
+    """
+    Computes the sample points and weights for composite Gauss-Legendre quadrature
+    according to the zeros of the given basis function
+
+    Parameters
+    ----------
+    basis_beta : Basis
+        Basis object
+    whichl: int
+        Index of reference basis function "l"
+    deg: int
+        Number of sample points and weights between neighboring zeros
+
+    Returns
+    -------
+    x : ndarray
+        1-D ndarray containing the sample points (in tau)
+    y : ndarray
+        1-D ndarray containing the weights.
+
+    """
+
+    check_type(basis_beta, [Basis])
+    ulx = lambda x: basis_beta.basis_xy.ulx(whichl, x)
+    section_edges = numpy.hstack((-1., find_zeros(ulx), 1.))
+
+    x, y = composite_leggauss(deg, section_edges)
+
+    return tau_for_x(x, basis_beta.beta), .5 * basis_beta.beta * y
+
 def sampling_points_matsubara(basis_beta, whichl):
     """
-    Return "optimal" sampling points in Matsubara domain for given basis
+    Computes "optimal" sampling points in Matsubara domain for given basis
+
+    Parameters
+    ----------
+    basis_beta : Basis
+        Basis object
+    whichl: int
+        Index of reference basis function "l"
+
+    Returns
+    -------
+    sampling_points: list of int
+        List of sampling points in Matsubara domain
+
     """
+    check_type(basis_beta, Basis)
     basis = basis_beta.basis_xy
     stat = basis.statistics
     beta = basis_beta.beta
@@ -179,3 +253,21 @@ def sampling_points_matsubara(basis_beta, whichl):
         r = numpy.unique(numpy.hstack((sp_half, -sp_half)))
 
     return r
+
+def Gl_pole(B, pole):
+    assert isinstance(B, Basis)
+
+    Sl = numpy.array([B.Sl(l) for l in range(B.dim)])
+
+    if B.statistics == 'F':
+        Vlpole = numpy.array([B.Vlomega(l, pole) for l in range(B.dim)])
+        return - Sl * Vlpole
+    elif B.statistics == 'B':
+        assert pole != 0
+        Vlpole = numpy.array([B.Vlomega(l, pole) for l in range(B.dim)])
+        return - Sl * Vlpole/pole
+    elif B.statistics == 'barB':
+        assert pole != 0
+        Vlpole = numpy.zeros((B.dim))
+        Vlpole[2:] = numpy.sqrt(1/B.wmax) * numpy.array([B.basis_xy.basis_b.vly(l, pole/B.wmax) for l in range(B.dim-2)])
+        return - Sl * Vlpole/pole

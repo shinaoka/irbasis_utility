@@ -24,13 +24,11 @@ class ThreePointPHBasis(object):
         self._beta = beta
         self._Bf = Basis(irbasis.load('F', Lambda), beta, cutoff)
         if augmented:
-            self._Bb = Basis(augmented_basis_b(Lambda), beta, cutoff)
+            self._Bb = Basis(augmented_basis_b(irbasis.load('B', Lambda)), beta, cutoff)
         else:
             self._Bb = Basis(irbasis.load('B', Lambda), beta, cutoff)
 
-        self._Nl = min(self._Bf.dim(), self._Bb.dim())
-        #assert Nl <= self._Bf.dim()
-        #assert Nl <= self._Bb.dim()
+        self._Nl = min(self._Bf.dim, self._Bb.dim)
 
         self._nshift = 2
         self._m = boson_freq

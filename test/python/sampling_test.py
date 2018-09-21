@@ -22,7 +22,7 @@ class TestMethods(unittest.TestCase):
             else:
                 b = Basis(irbasis.load(stat, Lambda), beta)
 
-            dim = b.dim()-4
+            dim = b.dim-4
             whichl = dim-1
             sp = sampling_points_matsubara(b, whichl)
 
