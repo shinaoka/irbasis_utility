@@ -47,7 +47,7 @@ class TestMethods(unittest.TestCase):
         Lambda = 10.0
         beta = 0.2
         wmax = Lambda/beta
-        phb = ThreePointPHBasis(boson_freq, Lambda, beta, 1e-12)
+        phb = FourPointPHView(boson_freq, Lambda, beta, 1e-12)
         Nl = phb.Nl
 
         iwn_f = lambda n : 1J*(2*n+1)*numpy.pi/beta 
@@ -75,22 +75,18 @@ class TestMethods(unittest.TestCase):
         beta = 0.2
         alpha = 1e-15
         augmented = True
-
-        wmax = Lambda/beta
-        phb = ThreePointPHBasis(boson_freq, Lambda, beta, 1e-5, augmented)
+        wmax = Lambda / beta
+        phb = FourPointPHView(boson_freq, Lambda, beta, 1e-5, augmented)
         Nl = phb.Nl
-
         pole = 0.2 * wmax
-
         sp = phb.sampling_points_matsubara()
         n_sp = len(sp)
-
         n1n2_check = []
         niw = 100
-        for i,j in product(range(-niw,niw,10), repeat=2):
-            n1n2_check.append((i,j))
+        for i, j in product(range(-niw, niw, 10), repeat=2):
+            n1n2_check.append((i, j))
         S = phb.normalized_S()
-        prj_check = numpy.array(phb.projector_to_matsubara_vec(n1n2_check))[:, :,:,:,:,:] * S[None, :]
+        prj_check = numpy.array(phb.projector_to_matsubara_vec(n1n2_check))[:, :, :, :, :, :] * S[None, :]
 
         # r = 0: Fermion, Fermion
         # r = 1: Boson, Fermion

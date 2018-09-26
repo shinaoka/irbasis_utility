@@ -8,14 +8,14 @@ from .internal import *
 from .two_point_basis import *
 
 def _sign(s):
-    return 1 if s%2 == 0 else -1
+    return 1 if ((s % 2) == 0) else -1
 
 #def _A_imp(u1, u2, Nl):
     #mat1 = numpy.array([u1(l) for l in range(Nl)])
     #mat2 = numpy.array([u2(l) for l in range(Nl)])
     #return numpy.einsum('i,j->ij', mat1, mat2)
 
-class ThreePointPHBasis(object):
+class FourPointPHView(object):
     def __init__(self, boson_freq, Lambda, beta, cutoff = 1e-8, augmented=True):
         if not isinstance(boson_freq, int):
             raise RuntimeError("boson_freq should be an integer")
@@ -27,9 +27,9 @@ class ThreePointPHBasis(object):
             self._Bb = Basis(augmented_basis_b(irbasis.load('B', Lambda)), beta, cutoff)
         else:
             self._Bb = Basis(irbasis.load('B', Lambda), beta, cutoff)
-
+        # DG: the below is tantamount to using a larger cutoff
+        # for one of the basis
         self._Nl = min(self._Bf.dim, self._Bb.dim)
-
         self._nshift = 2
         self._m = boson_freq
 
@@ -51,15 +51,15 @@ class ThreePointPHBasis(object):
 
     def normalized_S(self):
         Nl = self._Nl
-        svec = numpy.zeros((3,2,2,Nl,Nl))
-        sf = numpy.array([self._Bf.Sl(l)/self._Bf.Sl(0) for l in range(self._Nl)])
-        sb = numpy.array([self._Bb.Sl(l)/self._Bb.Sl(0) for l in range(self._Nl)])
-
+        svec = numpy.zeros((3, 2, 2, Nl, Nl))
+        sf = numpy.array([self._Bf.Sl(l) / self._Bf.Sl(0) for l in range(self._Nl)])
+        sb = numpy.array([self._Bb.Sl(l) / self._Bb.Sl(0) for l in range(self._Nl)])
+        # DG: at this point I am not sure
+        # what s1 and s2 dimensions are useful for.
         for s1, s2 in product(range(2), range(2)):
             svec[0, s1, s2, :, :] = sf[:, None] * sf[None, :]
             svec[1, s1, s2, :, :] = sb[:, None] * sf[None, :]
             svec[2, s1, s2, :, :] = sb[:, None] * sf[None, :]
-
         return svec
 
     def projector_to_matsubara_vec(self, n1_n2_vec):
