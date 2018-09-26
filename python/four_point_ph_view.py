@@ -52,8 +52,8 @@ class FourPointPHView(object):
     def normalized_S(self):
         Nl = self._Nl
         svec = numpy.zeros((3, 2, 2, Nl, Nl))
-        sf = numpy.array([self._Bf.Sl(l) / self._Bf.Sl(0) for l in range(self._Nl)])
-        sb = numpy.array([self._Bb.Sl(l) / self._Bb.Sl(0) for l in range(self._Nl)])
+        sf = numpy.array([self._Bf.Sl(l) / self._Bf.Sl(0) for l in range(Nl)])
+        sb = numpy.array([self._Bb.Sl(l) / self._Bb.Sl(0) for l in range(Nl)])
         # DG: at this point I am not sure
         # what s1 and s2 dimensions are useful for.
         for s1, s2 in product(range(2), range(2)):
@@ -105,24 +105,19 @@ class FourPointPHView(object):
         """
         sp_f = sampling_points_matsubara(self._Bf, whichl)
         sp_b = sampling_points_matsubara(self._Bb, whichl)
-
         sp = []
-
         Nf = len(sp_f)
         Nb = len(sp_b)
         for s1, s2 in product(range(2), repeat=2):
             for i, j in product(range(Nf), repeat=2):
                 # Fermion, Fermion
                 sp.append((sp_f[i] - s1 * self._m, sp_f[j] - s2 * self._m))
-
             for i, j in product(range(Nb), range(Nf)):
                 # Boson, Fermion
                 n2 = sp_f[j] - s2 * self._m
                 n1 = sp_b[i] - s1 * self._m + _sign(s1) * n2
-
                 sp.append((n1, n2))
                 sp.append((n2, n1))
-
         return list(set(sp))
 
     def _get_Usnl_f(self, s, n):
