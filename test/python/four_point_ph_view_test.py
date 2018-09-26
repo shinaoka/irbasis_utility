@@ -79,7 +79,8 @@ class TestMethods(unittest.TestCase):
         phb = FourPointPHView(boson_freq, Lambda, beta, 1e-5, augmented)
         Nl = phb.Nl
         pole = 0.2 * wmax
-        sp = phb.sampling_points_matsubara()
+        whichl = phb.Nl - 1
+        sp = phb.sampling_points_matsubara(whichl)
         n_sp = len(sp)
         n1n2_check = []
         niw = 100
@@ -101,7 +102,8 @@ class TestMethods(unittest.TestCase):
                 prj_mat = prj[:,:,:,:,:,:].reshape((n_sp, 3*2*2*Nl*Nl))
                 coeffs = ridge_complex(prj_mat, Giwn, alpha).reshape((3,2,2,Nl,Nl)) * S
 
-                Giwn_check_ref = numpy.array([_compute_Giw(phb, pole, s1, s2, r, n1n2[0], n1n2[1], boson_freq) for n1n2 in n1n2_check])
+                Giwn_check_ref = numpy.array([_compute_Giw(phb, pole, s1, s2, r, n1n2[0], n1n2[1], boson_freq)
+                                                  for n1n2 in n1n2_check])
                 Giwn_check = numpy.dot(prj_check.reshape((len(n1n2_check), 3*2*2*Nl*Nl)), (coeffs/S).reshape((3*2*2*Nl*Nl)))
                 #print("diff ", alpha, numpy.amax(numpy.abs(Giwn_check - Giwn_check_ref)))
                 self.assertLessEqual(numpy.amax(numpy.abs(Giwn_check - Giwn_check_ref)), 1e-5)

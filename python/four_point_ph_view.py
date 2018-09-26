@@ -99,12 +99,10 @@ class FourPointPHView(object):
             M[2, s1, s2, :, :] = numpy.einsum('i,j->ij', self._get_Usnl_b(s1, n2 + sign * n1), self._get_Usnl_f(s2, n1))
         return M
 
-    def sampling_points_matsubara(self):
+    def sampling_points_matsubara(self, whichl):
         """
         Return sampling points in two-fermion-frequency convention
         """
-        Nl = self._Nl
-        whichl = Nl - 1
         sp_f = sampling_points_matsubara(self._Bf, whichl)
         sp_b = sampling_points_matsubara(self._Bb, whichl)
 
