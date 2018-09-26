@@ -4,7 +4,7 @@ import numpy
 import irbasis
 
 from irbasis_util.two_point_basis import *
-from irbasis_util.three_point_ph import *
+from irbasis_util.four_point_ph_view import *
 from irbasis_util.internal import *
 from irbasis_util.regression import *
 
