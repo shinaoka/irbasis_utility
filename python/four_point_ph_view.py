@@ -54,8 +54,6 @@ class FourPointPHView(object):
         svec = numpy.zeros((3, 2, 2, Nl, Nl))
         sf = numpy.array([self._Bf.Sl(l) / self._Bf.Sl(0) for l in range(Nl)])
         sb = numpy.array([self._Bb.Sl(l) / self._Bb.Sl(0) for l in range(Nl)])
-        # DG: at this point I am not sure
-        # what s1 and s2 dimensions are useful for.
         for s1, s2 in product(range(2), range(2)):
             svec[0, s1, s2, :, :] = sf[:, None] * sf[None, :]
             svec[1, s1, s2, :, :] = sb[:, None] * sf[None, :]
@@ -94,6 +92,7 @@ class FourPointPHView(object):
         M = numpy.zeros((3, self._nshift, self._nshift, self._Nl, self._Nl), dtype=complex)
         for s1, s2 in product(range(self._nshift), repeat=2):
             sign = -1 * _sign(s1)
+            # Note: with this signature, einsum does not actually perform any summation
             M[0, s1, s2, :, :] = numpy.einsum('i,j->ij', self._get_Usnl_f(s1, n1),             self._get_Usnl_f(s2, n2))
             M[1, s1, s2, :, :] = numpy.einsum('i,j->ij', self._get_Usnl_b(s1, n1 + sign * n2), self._get_Usnl_f(s2, n2))
             M[2, s1, s2, :, :] = numpy.einsum('i,j->ij', self._get_Usnl_b(s1, n2 + sign * n1), self._get_Usnl_f(s2, n1))
