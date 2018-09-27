@@ -160,21 +160,19 @@ class TestMethods(unittest.TestCase):
         # Build the check frequency structure
         n1n2_check = []
         niw = 100
-        for i, j in product(range(-niw, niw, 10), repeat=2):
+        niw_hf = 10000
+        wide_niw_check = numpy.hstack((range(-niw_hf, -niw, 500), range(-niw, niw, 10), range(niw, niw_hf, 500)))
+        for i, j in product(wide_niw_check, repeat=2):
             n1n2_check.append((i, j))
         prj_check = numpy.array(phb.projector_to_matsubara_vec(n1n2_check))[:, :, :, :, :, :] * S[None, :]
-        Giwn = numpy.zeros((n_sp), dtype=numpy.complex128)
-        Giwn_check_ref = numpy.zeros((len(n1n2_check)), dtype=numpy.complex128)
         # r = 0: Fermion, Fermion
         # r = 1: Boson, Fermion
         # r = 2: Boson, Fermion
-        for r in range(3):
-            for s1, s2 in product(range(2), repeat=2):
-                Giwn += numpy.array([_G2_conn_ph(U, beta, n1n2[0], n1n2[1], boson_freq) for n1n2 in sp])
-                Giwn_check_ref += numpy.array([_G2_conn_ph(U, beta, n1n2[0], n1n2[1], boson_freq) for n1n2 in n1n2_check])
+        Giwn = numpy.array([_G2_conn_ph(U, beta, n1n2[0], n1n2[1], boson_freq) for n1n2 in sp])
         coeffs = ridge_complex(prj_mat, Giwn, alpha).reshape((3, 2, 2, Nl, Nl))
         Giwn_check = numpy.dot(prj_check.reshape((len(n1n2_check), 3 * 2 * 2 * Nl * Nl)),
                                    (coeffs).reshape((3 * 2 * 2 * Nl * Nl)))
+        Giwn_check_ref = numpy.array([_G2_conn_ph(U, beta, n1n2[0], n1n2[1], boson_freq) for n1n2 in n1n2_check])
         self.assertLessEqual(numpy.amax(numpy.abs(Giwn_check - Giwn_check_ref)), 1e-5)
                 
 if __name__ == '__main__':
