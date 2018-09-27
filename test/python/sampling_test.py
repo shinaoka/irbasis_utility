@@ -22,20 +22,20 @@ class TestMethods(unittest.TestCase):
             else:
                 b = Basis(irbasis.load(stat, Lambda), beta)
 
-            dim = b.dim-4
-            whichl = dim-1
+            dim = b.dim - 4
+            whichl = dim - 1
             sp = sampling_points_matsubara(b, whichl)
 
-            Unl = b.compute_Unl(sp)[:,:dim]
+            Unl = b.compute_Unl(sp)[:, :dim]
             Unl_real = from_complex_to_real_coeff_matrix(Unl)
             U, S, Vh = scipy.linalg.svd(Unl_real, full_matrices=False)
-            cond_num = S[0]/S[-1]
+            cond_num = S[0] / S[-1]
 
             print("cond_num ", cond_num)
             print(sp)
             print(Unl.shape)
-            print(U[:,-1])
-            print(Vh.T[:,-1])
+            print(U[:, -1])
+            print(Vh.T[:, -1])
             for s in S:
                 print(s)
             self.assertLessEqual(cond_num, 1000)
