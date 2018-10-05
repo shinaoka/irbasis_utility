@@ -29,6 +29,7 @@ class FourPointPHView(object):
             self._Bb = Basis(irbasis.load('B', Lambda), beta, cutoff)
         # DG: the below is tantamount to using a larger cutoff
         # for one of the basis
+        # HS: For simplicity of implementation, we use the same number of basis functions for fermions and bosons
         self._Nl = min(self._Bf.dim, self._Bb.dim)
         self._nshift = 2
         self._m = boson_freq

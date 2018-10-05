@@ -15,6 +15,22 @@ def _delta(i, j):
         return 0
 
 def _F_ph(U, beta, n, np, m):
+    """
+    Implementation of analytic form for atomic limit: Eqs. (30) and (31) in
+    G. Rohringer et al., PRB 86, 125114 (2012)
+
+    Parameters
+    ----------
+    U
+    beta
+    n
+    np
+    m
+
+    Returns
+    -------
+
+    """
     nu = (2 * n + 1) * numpy.pi / beta
     nu_p = (2 * np + 1) * numpy.pi / beta
     omega = 2 * m * numpy.pi / beta
@@ -37,6 +53,23 @@ def _F_ph(U, beta, n, np, m):
     return Fuu, Fud
 
 def _G2_conn_ph(U, beta, n, np, m):
+    """
+    Implementation of analytic form for atomic limit:
+    The second term of the right-hand side of Eq. (9)
+    in G. Rohringer et al., PRB 86, 125114 (2012)
+
+    Parameters
+    ----------
+    U
+    beta
+    n
+    np
+    m
+
+    Returns
+    -------
+
+    """
     Fuu, Fud = _F_ph(U, beta, n, np, m)
     nu = (2 * n + 1) * numpy.pi / beta
     nu_p = (2 * np + 1) * numpy.pi / beta
@@ -165,9 +198,6 @@ class TestMethods(unittest.TestCase):
         for i, j in product(wide_niw_check, repeat=2):
             n1n2_check.append((i, j))
         prj_check = numpy.array(phb.projector_to_matsubara_vec(n1n2_check))[:, :, :, :, :, :] * S[None, :]
-        # r = 0: Fermion, Fermion
-        # r = 1: Boson, Fermion
-        # r = 2: Boson, Fermion
         Giwn = numpy.array([_G2_conn_ph(U, beta, n1n2[0], n1n2[1], boson_freq) for n1n2 in sp])
         coeffs = ridge_complex(prj_mat, Giwn, alpha).reshape((3, 2, 2, Nl, Nl))
         Giwn_check = numpy.dot(prj_check.reshape((len(n1n2_check), 3 * 2 * 2 * Nl * Nl)),
