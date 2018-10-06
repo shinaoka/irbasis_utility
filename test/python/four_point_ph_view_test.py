@@ -176,9 +176,12 @@ class TestMethods(unittest.TestCase):
         Giwn_check = numpy.dot(prj_check.reshape((len(n1n2_check), 3 * 2 * 2 * Nl * Nl)),
                                    (coeffs).reshape((3 * 2 * 2 * Nl * Nl)))
         Giwn_check_ref = numpy.array([_G2_conn_ph(U, beta, n1n2[0], n1n2[1], boson_freq) for n1n2 in n1n2_check])
-        self.assertLessEqual(numpy.amax(numpy.abs(Giwn_check - Giwn_check_ref)), 1e-3)
+        # absolute error
+        #self.assertLessEqual(numpy.amax(numpy.abs(Giwn_check - Giwn_check_ref), 1e-3)
+        # try relative error
+        self.assertLessEqual(numpy.amax(numpy.abs(Giwn_check - Giwn_check_ref) /
+                                            (numpy.abs(Giwn_check_ref) + numpy.abs(Giwn_check))), 1e-3)
 
-numpy.random.normal(loc=0.0, scale=1.0, size=None)
         
 if __name__ == '__main__':
     unittest.main()
