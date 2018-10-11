@@ -20,24 +20,34 @@ def G1_iw_pole_b(n, pole, beta):
 def _compute_G4pt_iw(beta, pole, r, nvec):
     if r == 0:
         return G1_iw_pole_f(nvec[0], pole, beta) * G1_iw_pole_f(nvec[1], pole, beta) * G1_iw_pole_f(nvec[2], pole, beta)
+    elif r == 1:
+        return G1_iw_pole_f(nvec[0], pole, beta) * G1_iw_pole_f(nvec[1], pole, beta) * G1_iw_pole_f(nvec[3], pole, beta)
     elif r == 4:
         return G1_iw_pole_f(nvec[0], pole, beta) * G1_iw_pole_b(nvec[0] + nvec[1] + 1, pole, beta)\
                * G1_iw_pole_f(-nvec[3] - 1, pole, beta)
+    elif r == 5:
+        return G1_iw_pole_f(nvec[0], pole, beta) * G1_iw_pole_b(nvec[0] + nvec[1] + 1, pole, beta) \
+               * G1_iw_pole_f(-nvec[2] - 1, pole, beta)
     else:
         raise RuntimeError("Not supported")
 
 def _outer_product(Gl1, Gl2, Gl3):
     tensor12 =  Gl1[:, numpy.newaxis] * Gl2[numpy.newaxis, :]
-    return tensor12 * Gl3[numpy.newaxis, numpy.newaxis, :]
+    return tensor12[:, :, numpy.newaxis] * Gl3[numpy.newaxis, numpy.newaxis, :]
 
 def _compute_G4pt_l(b4pt, pole, r):
     Nl = b4pt.Nl
     Gl = numpy.zeros((16, Nl, Nl, Nl))
-    if r == 0:
+    if r >= 0  and r <= 3:
         Gl[r, :, :, :] = _outer_product(
-            Gl_pole(b4pt.basis_beta_f, pole),
-            Gl_pole(b4pt.basis_beta_f, pole),
-            Gl_pole(b4pt.basis_beta_f, pole))
+            Gl_pole(b4pt.basis_beta_f, pole)[:Nl],
+            Gl_pole(b4pt.basis_beta_f, pole)[:Nl],
+            Gl_pole(b4pt.basis_beta_f, pole)[:Nl])
+    elif r <= 15:
+        Gl[r, :, :, :] = _outer_product(
+            Gl_pole(b4pt.basis_beta_f, pole)[:Nl],
+            Gl_pole(b4pt.basis_beta_b, pole)[:Nl],
+            Gl_pole(b4pt.basis_beta_f, pole)[:Nl])
     else:
         raise RuntimeError("Not supported")
 
@@ -51,7 +61,7 @@ class TestMethods(unittest.TestCase):
         Lambda = 10.0
         beta = 0.2
         wmax = Lambda/beta
-        b4pt = FourPoint(Lambda, beta, 1e-8)
+        b4pt = FourPoint(Lambda, beta, 1e-12)
         Nl = b4pt.Nl
 
         pole = 0.2 * wmax
@@ -60,14 +70,14 @@ class TestMethods(unittest.TestCase):
         n4 = - n1 - n2 - n3
 
         prj = b4pt.projector_to_matsubara(n1, n2, n3, n4)
-        print("A", prj.shape)
 
-        for r in [0]:
+        # Test No. 1, 2, 5, 6
+        for r in [0, 1, 4, 5]:
             giw_4pt = _compute_G4pt_iw(beta, pole, r, numpy.array([n1, n2, n3, n4]))
             gl_4pt = _compute_G4pt_l(b4pt, pole, r)
 
-            print(numpy.sum(prj[r,:,:,:] * gl_4pt[r,:,:,:])/ giw_4pt)
-            self.assertLess(numpy.abs(numpy.sum(prj * gl_4pt) - giw_4pt), 1e-10)
+            diff = numpy.abs(numpy.sum(prj * gl_4pt) - giw_4pt)
+            self.assertLess(diff, 1e-10)
 
 if __name__ == '__main__':
     unittest.main()
