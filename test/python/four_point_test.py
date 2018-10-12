@@ -85,7 +85,7 @@ class TestMethods(unittest.TestCase):
         alpha = 1e-15
         augmented = True
         wmax = Lambda / beta
-        b4pt = FourPoint(Lambda, beta, 1e-3, augmented)
+        b4pt = FourPoint(Lambda, beta, 1e-2, augmented)
         Nl = b4pt.Nl
         whichl = Nl - 1
         pole = 0.2 * wmax
@@ -108,7 +108,7 @@ class TestMethods(unittest.TestCase):
             Giwn_check_ref = numpy.array([_compute_G4pt_iw(beta, pole, r, n1234) for n1234 in n1234_check])
             coeffs = ridge_complex(prj_mat, Giwn, alpha).reshape((16, Nl, Nl, Nl))
             Giwn_check = numpy.dot(prj_check.reshape((len(n1234_check), 16 * Nl**3)), (coeffs).reshape((16 * Nl**3)))
-            self.assertLessEqual(numpy.amax(numpy.abs(Giwn_check - Giwn_check_ref)), 1e-3)
+            self.assertLessEqual(numpy.amax(numpy.abs(Giwn_check - Giwn_check_ref)), 1e-2)
 
 if __name__ == '__main__':
     unittest.main()
