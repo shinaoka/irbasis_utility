@@ -12,22 +12,14 @@ def _sign(s):
 
 
 # FFF representations (#1-#4)
-n1n2n3_FFF = list()
-n1n2n3_FFF.append((0,1,2)) # (iw_1, i_w2, i_w3)
-n1n2n3_FFF.append((0,1,3)) # (iw_1, i_w2, i_w4)
-n1n2n3_FFF.append((0,2,3)) # (iw_1, i_w3, i_w4)
-n1n2n3_FFF.append((1,2,3)) # (iw_2, i_w3, i_w4)
+idx_n1n2n3_FFF = list()
+idx_n1n2n3_FFF.append(numpy.array((0,1,2))) # (iw_1, i_w2, i_w3)
+idx_n1n2n3_FFF.append(numpy.array((0,1,3))) # (iw_1, i_w2, i_w4)
+idx_n1n2n3_FFF.append(numpy.array((0,2,3))) # (iw_1, i_w3, i_w4)
+idx_n1n2n3_FFF.append(numpy.array((1,2,3))) # (iw_2, i_w3, i_w4)
 
 # FBF representations (#5-#16)
-n1n2n4_FBF = list()
-for p in permutations([0, 1, 2, 3]):
-    tp1 = p[0]
-    tp2 = p[1]
-    tp3 = p[2]
-    tp4 = p[3]
-    if tp1 > tp4:
-        continue
-    n1n2n4_FBF.append((p[0], p[1], p[3]))
+idx_n1n2n4_FBF = [numpy.array((p[0], p[1], p[3])) for p in permutations([0, 1, 2, 3]) if p[0] < p[3]]
 
 
 class FourPoint(object):
@@ -58,6 +50,15 @@ class FourPoint(object):
     @property
     def basis_beta_b(self):
         return self._Bb
+
+    def normalized_S(self):
+        Nl = self._Nl
+        svec = numpy.zeros((16, Nl, Nl, Nl))
+        sf = numpy.array([self._Bf.Sl(l) / self._Bf.Sl(0) for l in range(Nl)])
+        sb = numpy.array([self._Bb.Sl(l) / self._Bb.Sl(0) for l in range(Nl)])
+        svec[0:4, :, :, :] = sf[:, None, None] * sf[None, :, None] * sf[None, None, :]
+        svec[4:, :, :, :] = sf[:, None, None] * sb[None, :, None] * sf[None, None, :]
+        return svec
 
     def projector_to_matsubara_vec(self, n1_n2_n3_n4_vec):
         """
@@ -91,17 +92,50 @@ class FourPoint(object):
         M = numpy.zeros((16, self._Nl, self._Nl, self._Nl), dtype=complex)
         # FFF representations
         for r in range(4):
-            n1_p, n2_p, n3_p = nvec[n1n2n3_FFF[r][0]], nvec[n1n2n3_FFF[r][1]], nvec[n1n2n3_FFF[r][2]]
+            n1_p, n2_p, n3_p = nvec[idx_n1n2n3_FFF[r]]
             tensor_left = numpy.einsum('i,j->ij', self._get_Unl_f(n1_p), self._get_Unl_f(n2_p))
             M[r, :, :, :] = numpy.einsum('ij,k->ijk', tensor_left, self._get_Unl_f(n3_p))
 
         # FBF representations
         for r in range(12):
-            n1_p, n2_p, n4_p = nvec[n1n2n4_FBF[r][0]], nvec[n1n2n4_FBF[r][1]], nvec[n1n2n4_FBF[r][2]]
+            n1_p, n2_p, n4_p = nvec[idx_n1n2n4_FBF[r]]
             tensor_FB = numpy.einsum('i,j->ij', self._get_Unl_f(n1_p), self._get_Unl_b(n1_p + n2_p + 1))
             M[r + 4, :, :, :] = numpy.einsum('ij,k->ijk', tensor_FB, self._get_Unl_f(-n4_p - 1))
 
         return M
+
+    def sampling_points_matsubara(self, whichl):
+        """
+        Return sampling points
+        """
+        sp_f = sampling_points_matsubara(self._Bf, whichl)
+        sp_b = sampling_points_matsubara(self._Bb, whichl)
+        sp = []
+        Nf = len(sp_f)
+        Nb = len(sp_b)
+
+        nvec = numpy.zeros((4), dtype=int)
+
+        # FFF
+        append_sp = lambda n1, n2, n3 : sp.append((n1, n2, n3, -n1-n2-n3))
+        for i, j, k in product(range(Nf), repeat=3):
+            nvec[:3] = sp_f[i], sp_f[j], sp_f[k]
+            nvec[3] = - nvec[0] - nvec[1] - nvec[2]
+            append_sp(nvec[0], nvec[1], nvec[2]) # No. 1
+            append_sp(nvec[0], nvec[1], nvec[3]) # No. 2
+            append_sp(nvec[0], nvec[2], nvec[3]) # No. 3
+            append_sp(nvec[1], nvec[2], nvec[3]) # No. 4
+
+        # FBF
+        perms = [numpy.array(p) for p in permutations([0, 1, 2, 3]) if p[0] < p[1]]
+        for i, j, k in product(range(Nf), range(Nb), range(Nf)):
+            nf1, nb, nf2 = sp_f[i], sp_b[j], sp_f[k]
+            nvec[0], nvec[1], nvec[3] = nf1, nb - nf1 - 1, -nf2 - 1
+            nvec[2] = - nvec[0] - nvec[1] - nvec[3]
+            for p in perms:
+                sp.append(tuple(nvec[p]))
+
+        return list(set(sp))
 
     def _get_Unl_f(self, n):
         return self._Bf.compute_Unl([n])[:,0:self._Nl].reshape((self._Nl))

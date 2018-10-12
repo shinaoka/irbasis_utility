@@ -79,5 +79,36 @@ class TestMethods(unittest.TestCase):
             diff = numpy.abs(numpy.sum(prj * gl_4pt) - giw_4pt)
             self.assertLess(diff, 1e-10)
 
+    def test_sampling_points_matsubara(self):
+        Lambda = 10.0
+        beta = 0.2
+        alpha = 1e-15
+        augmented = True
+        wmax = Lambda / beta
+        b4pt = FourPoint(Lambda, beta, 1e-3, augmented)
+        Nl = b4pt.Nl
+        whichl = Nl - 1
+        pole = 0.2 * wmax
+        # build the sampling frequency structure
+        sp = b4pt.sampling_points_matsubara(whichl)
+        S = b4pt.normalized_S()
+        n_sp = len(sp)
+        prj = numpy.array(b4pt.projector_to_matsubara_vec(sp))[:, :,  :, :]
+        prj_mat = prj[:, :, :, :].reshape((n_sp, 16 * Nl**3))
+        print(Nl, prj_mat.shape)
+        # Build the check frequency structure
+        n1234_check = []
+        niw = 100
+        for i, j, k in product(range(-niw, niw, 10), repeat=3):
+            n1234_check.append((i, j, k, - i - j - k))
+        prj_check = numpy.array(b4pt.projector_to_matsubara_vec(n1234_check))[:, :, :, :]
+        # Test No. 1, 2, 5, 6
+        for r in [0, 1, 4, 5]:
+            Giwn = numpy.array([ _compute_G4pt_iw(beta, pole, r, n1234) for n1234 in sp])
+            Giwn_check_ref = numpy.array([_compute_G4pt_iw(beta, pole, r, n1234) for n1234 in n1234_check])
+            coeffs = ridge_complex(prj_mat, Giwn, alpha).reshape((16, Nl, Nl, Nl))
+            Giwn_check = numpy.dot(prj_check.reshape((len(n1234_check), 16 * Nl**3)), (coeffs).reshape((16 * Nl**3)))
+            self.assertLessEqual(numpy.amax(numpy.abs(Giwn_check - Giwn_check_ref)), 1e-3)
+
 if __name__ == '__main__':
     unittest.main()
