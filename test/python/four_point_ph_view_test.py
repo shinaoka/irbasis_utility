@@ -7,46 +7,7 @@ from irbasis_util.two_point_basis import *
 from irbasis_util.four_point_ph_view import *
 from irbasis_util.internal import *
 from irbasis_util.regression import *
-
-def _delta(i, j):
-    if i==j:
-        return 1
-    else:
-        return 0
-
-def _F_ph(U, beta, n, np, m):
-    nu = (2 * n + 1) * numpy.pi / beta
-    nu_p = (2 * np + 1) * numpy.pi / beta
-    omega = 2 * m * numpy.pi / beta
-    r1 = nu + omega
-    r2 = nu_p + omega
-    tmp = 1. / (nu * r1 * r2 * nu_p)
-    Fuu = (-0.25 * beta * (U**2) * (_delta(n,np) - _delta(m,0)) *
-               (1 + 0.25 * (U / nu)**2) * (1 + 0.25 * (U / r2)**2))    
-    t1 = 0.125 * (U**3) * (nu**2 + r1**2 + r2**2 + nu_p**2) * tmp
-    t2 = (3.0 / 16.0) * (U**5) * tmp
-    t3 = (beta * 0.25 * (U**2) *
-              (1 / (1 + numpy.exp(0.5 * beta * U)))
-              * (2 * _delta(nu, -nu_p - m) + _delta(m, 0)) *
-              (1 + 0.25 * (U / r1)**2) * (1 + 0.25 * (U / r2)**2))
-    t4 = (-beta * 0.25 * (U**2) *
-              (1 / (1 + numpy.exp(-0.5 * beta * U)))
-              * (2 * _delta(nu, nu_p) + _delta(m, 0)) *
-              (1 + 0.25 * (U / nu)**2) * (1 + 0.25 * (U / r2)**2))
-    Fud = -U + t1 + t2 + t3 + t4
-    return Fuu, Fud
-
-def _G2_conn_ph(U, beta, n, np, m):
-    Fuu, Fud = _F_ph(U, beta, n, np, m)
-    nu = (2 * n + 1) * numpy.pi / beta
-    nu_p = (2 * np + 1) * numpy.pi / beta
-    omega = 2 * m * numpy.pi / beta    
-    hU = 0.5 * U
-    leggs_1 = nu * (nu + omega) * nu_p * (nu_p + omega)
-    leggs_2 = ((hU**2 + nu**2) * (hU**2 + nu_p**2) *
-                   (hU**2 + (nu + omega)**2) * (hU**2 + (nu_p + omega)**2))
-    leggs = leggs_1 / leggs_2
-    return leggs * Fuu + leggs * Fud
+from atomic_limit import *
 
 def _compute_Gl(phb, pole, s1, s2, r):
     Nl = phb.Nl
@@ -146,6 +107,7 @@ class TestMethods(unittest.TestCase):
         beta = 5.0
         U = 2.0
         alpha = 1e-15
+        noise = 0.0
         augmented = True
         wmax = Lambda / beta
         phb = FourPointPHView(boson_freq, Lambda, beta, 1e-5, augmented)
@@ -165,15 +127,20 @@ class TestMethods(unittest.TestCase):
         for i, j in product(wide_niw_check, repeat=2):
             n1n2_check.append((i, j))
         prj_check = numpy.array(phb.projector_to_matsubara_vec(n1n2_check))[:, :, :, :, :, :] * S[None, :]
-        # r = 0: Fermion, Fermion
-        # r = 1: Boson, Fermion
-        # r = 2: Boson, Fermion
-        Giwn = numpy.array([_G2_conn_ph(U, beta, n1n2[0], n1n2[1], boson_freq) for n1n2 in sp])
+        Giwn = numpy.array([G2_conn_ph(U, beta, n1n2[0], n1n2[1], boson_freq) for n1n2 in sp])
+        #print ("adding noise")
+        noise_iwn = numpy.random.normal(loc=0.0, scale=noise, size=(len(sp)))
+        Giwn = noise_iwn + Giwn
         coeffs = ridge_complex(prj_mat, Giwn, alpha).reshape((3, 2, 2, Nl, Nl))
         Giwn_check = numpy.dot(prj_check.reshape((len(n1n2_check), 3 * 2 * 2 * Nl * Nl)),
                                    (coeffs).reshape((3 * 2 * 2 * Nl * Nl)))
-        Giwn_check_ref = numpy.array([_G2_conn_ph(U, beta, n1n2[0], n1n2[1], boson_freq) for n1n2 in n1n2_check])
-        self.assertLessEqual(numpy.amax(numpy.abs(Giwn_check - Giwn_check_ref)), 1e-5)
-                
+        Giwn_check_ref = numpy.array([G2_conn_ph(U, beta, n1n2[0], n1n2[1], boson_freq) for n1n2 in n1n2_check])
+        # absolute error
+        self.assertLessEqual(numpy.amax(numpy.abs(Giwn_check - Giwn_check_ref)), 1e-3)
+        # try relative error
+        #self.assertLessEqual(numpy.amax(numpy.abs(Giwn_check - Giwn_check_ref) /
+                                            #(numpy.abs(Giwn_check_ref) + numpy.abs(Giwn_check))), 1e-3)
+
+        
 if __name__ == '__main__':
     unittest.main()
