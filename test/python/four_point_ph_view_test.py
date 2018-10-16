@@ -109,7 +109,6 @@ class TestMethods(unittest.TestCase):
         alpha = 1e-15
         noise = 0.0
         augmented = True
-        wmax = Lambda / beta
         phb = FourPointPHView(boson_freq, Lambda, beta, 1e-5, augmented)
         Nl = phb.Nl
         whichl = Nl - 1
@@ -128,7 +127,6 @@ class TestMethods(unittest.TestCase):
             n1n2_check.append((i, j))
         prj_check = numpy.array(phb.projector_to_matsubara_vec(n1n2_check))[:, :, :, :, :, :] * S[None, :]
         Giwn = numpy.array([G2_conn_ph(U, beta, n1n2[0], n1n2[1], boson_freq) for n1n2 in sp])
-        #print ("adding noise")
         noise_iwn = numpy.random.normal(loc=0.0, scale=noise, size=(len(sp)))
         Giwn = noise_iwn + Giwn
         coeffs = ridge_complex(prj_mat, Giwn, alpha).reshape((3, 2, 2, Nl, Nl))
@@ -137,10 +135,6 @@ class TestMethods(unittest.TestCase):
         Giwn_check_ref = numpy.array([G2_conn_ph(U, beta, n1n2[0], n1n2[1], boson_freq) for n1n2 in n1n2_check])
         # absolute error
         self.assertLessEqual(numpy.amax(numpy.abs(Giwn_check - Giwn_check_ref)), 1e-3)
-        # try relative error
-        #self.assertLessEqual(numpy.amax(numpy.abs(Giwn_check - Giwn_check_ref) /
-                                            #(numpy.abs(Giwn_check_ref) + numpy.abs(Giwn_check))), 1e-3)
-
-        
+      
 if __name__ == '__main__':
     unittest.main()
