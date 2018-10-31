@@ -131,16 +131,18 @@ class Basis(object):
         return self._sl_const * self._b.sl(l)
 
     def Ultau(self, l, tau):
-        # DG: why do we not apply _my_mod(tau, slef._beta) here?
         check_type(l, [int])
         check_type(tau, [float])
-        return self._scale * self._b.ulx(l, 2 * tau / self._beta - 1)
+        t, s = my_mod(tau, self._beta)
+        x = 2 * t / self._beta - 1
+        sign = s if self._stat == 'F' else 1
+        return sign * self._scale * self._b.ulx(l, x)
 
     def Ultau_all_l(self, tau):
         check_type(tau, [float])
-        t, s = _my_mod(tau, self._beta)
+        t, s = my_mod(tau, self._beta)
         x = 2 * t / self._beta - 1
-        sign = s if self._statistics == 'F' else 1
+        sign = s if self._stat == 'F' else 1
         return sign * self._scale * self._b.ulx_all_l(x)
 
     def Vlomega(self, l, omega):

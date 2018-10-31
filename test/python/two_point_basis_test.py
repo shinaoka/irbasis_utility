@@ -26,7 +26,7 @@ class TestMethods(unittest.TestCase):
 
     def test_Utau(self):
         l = 1
-        for tau in [0, 0.5, beta]:
+        for tau in [0, 0.5, 0.9999999*beta]:
             x = 2 * tau/beta - 1
             self.assertAlmostEqual(numpy.sqrt(2/beta) * self._b.ulx(l, x), self._B.Ultau(l, tau), delta=1e-10)
 
