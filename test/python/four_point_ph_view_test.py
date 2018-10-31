@@ -26,14 +26,17 @@ def _compute_Gl(phb, pole, s1, s2, r):
 
 def _compute_Giw(beta, pole, s1, s2, r, n1, n2, boson_freq):
     iwn_f = lambda n : 1J * (2*n + 1) * numpy.pi / beta 
-    iwn_b = lambda n : 1J * (2 * n) * numpy.pi / beta 
+    iwn_b = lambda n : 1J * (2 * n) * numpy.pi / beta
+    o1, o2 = 2*n1+1, 2*n2+1
     if r == 0:
         return 1 / ((iwn_f(n1) + s1 * iwn_b(boson_freq) - pole) * (iwn_f(n2) + s2 * iwn_b(boson_freq) - pole))
     elif r == 1:
-        n1_tmp = n1 + n2 * (-1) ** (s1+1)
+        o1_tmp = o1 + o2 * (-1) ** (s1+1)
+        n1_tmp = o_to_matsubara_idx_b(o1_tmp)
         return 1 / ((iwn_b(n1_tmp) + s1 * iwn_b(boson_freq) - pole) * (iwn_f(n2) + s2 * iwn_b(boson_freq) - pole))
     elif r == 2:
-        n_tmp = n2 + n1 * (-1)**(s1+1)
+        o_tmp = o2 + o1 * (-1)**(s1+1)
+        n_tmp = o_to_matsubara_idx_b(o_tmp)
         return 1 / ((iwn_b(n_tmp) + s1 * iwn_b(boson_freq) - pole) * (iwn_f(n1) + s2 * iwn_b(boson_freq) - pole))
 
 class TestMethods(unittest.TestCase):
@@ -61,7 +64,7 @@ class TestMethods(unittest.TestCase):
                 coeffs = _compute_Gl(phb, pole, s1, s2, r)
                 Giwn_ref = _compute_Giw(beta, pole, s1, s2, r, n1, n2, boson_freq)
                 Giwn = numpy.sum(prj * coeffs)
-                assert numpy.abs(Giwn_ref/Giwn - 1) < 1e-7
+                self.assertLessEqual(numpy.abs(Giwn_ref/Giwn - 1), 1e-7)
 
     def test_sampling_points_matsubara(self):
         boson_freq = 10

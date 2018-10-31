@@ -152,4 +152,32 @@ def get_ultau(tau, beta, basis):
     Ultau = numpy.sqrt(2/beta) * ulx
     return Ultau
 
+def o_to_matsubara_idx_f(o):
+    """
+    Convert index in "o" convension to fermionic Matsubara index
 
+    Parameters
+    ----------
+    o 2*n+1
+
+    Returns n
+    -------
+
+    """
+    assert o%2 == 1
+    return int((o-1)/2)
+
+def o_to_matsubara_idx_b(o):
+    """
+    Convert index in "o" convension to bosonic Matsubara index
+
+    Parameters
+    ----------
+    o 2*n
+
+    Returns n
+    -------
+
+    """
+    assert o%2 == 0
+    return int(o/2)

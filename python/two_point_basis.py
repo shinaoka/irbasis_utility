@@ -156,8 +156,9 @@ class Basis(object):
         for i in range(len(nvec_compt)):
             self._Unl_cache[nvec_compt[i]] = numpy.sqrt(self._beta) * unl[i,:self._dim]
 
-    def compute_Unl(self, nvec):
-        self._precompute_Unl(nvec)
+    def compute_Unl(self, nvec, auto_compute=True):
+        if auto_compute:
+            self._precompute_Unl(nvec)
         num_n = len(nvec)
         Unl = numpy.empty((num_n, self.dim), dtype=complex)
         for i in range(num_n):
