@@ -33,6 +33,7 @@ class FourPointPHView(object):
         self._Nl = min(self._Bf.dim, self._Bb.dim)
         self._nshift = 2
         self._m = boson_freq
+        self._o = 2 * boson_freq
 
     @property
     def beta(self):
@@ -65,21 +66,21 @@ class FourPointPHView(object):
         """
         Return a projector from IR to Matsubara frequencies
         """
-        n_f = []
-        n_b = []
+        o_f = []
+        o_b = []
         for i in range(len(n1_n2_vec)):
-            n1 = n1_n2_vec[i][0]
-            n2 = n1_n2_vec[i][1]
-            n_f.append(n1)
-            n_f.append(n2)
-            n_f.append(n1 + self._m)
-            n_f.append(n2 + self._m)
-            n_b.append(n1 - n2)
-            n_b.append(n1 + n2 + self._m)
-            n_b.append(n2 - n1)
-            n_b.append(n2 + n1 + self._m)
-        self._Bf._precompute_Unl(n_f)
-        self._Bb._precompute_Unl(n_b)
+            o1 = 2*n1_n2_vec[i][0] + 1
+            o2 = 2*n1_n2_vec[i][1] + 1
+            o_f.append(o1)
+            o_f.append(o2)
+            o_f.append(o1 + self._o)
+            o_f.append(o2 + self._o)
+            o_b.append(o1 - o2)
+            o_b.append(o1 + o2 + self._o)
+            o_b.append(o2 - o1)
+            o_b.append(o2 + o1 + self._o)
+        self._Bf._precompute_Unl(list(map(o_to_matsubara_idx_f, o_f)))
+        self._Bb._precompute_Unl(list(map(o_to_matsubara_idx_b, o_b)))
 
         r = []
         for i in range(len(n1_n2_vec)):
@@ -90,35 +91,50 @@ class FourPointPHView(object):
         """
         Return a projector from IR to a Matsubara frequency
         """
+        o1, o2 = 2*n1 + 1, 2*n2 + 1
         M = numpy.zeros((3, self._nshift, self._nshift, self._Nl, self._Nl), dtype=complex)
         for s1, s2 in product(range(self._nshift), repeat=2):
             sign = -1 * _sign(s1)
             # Note: with this signature, einsum does not actually perform any summation
-            M[0, s1, s2, :, :] = numpy.einsum('i,j->ij', self._get_Usnl_f(s1, n1),             self._get_Usnl_f(s2, n2))
-            M[1, s1, s2, :, :] = numpy.einsum('i,j->ij', self._get_Usnl_b(s1, n1 + sign * n2), self._get_Usnl_f(s2, n2))
-            M[2, s1, s2, :, :] = numpy.einsum('i,j->ij', self._get_Usnl_b(s1, n2 + sign * n1), self._get_Usnl_f(s2, n1))
+            # HS: may be better to write like A[:, None] * B[None, :] ?
+            M[0, s1, s2, :, :] = numpy.einsum('i,j->ij', self._get_Usol(s1, o1),             self._get_Usol(s2, o2))
+            M[1, s1, s2, :, :] = numpy.einsum('i,j->ij', self._get_Usol(s1, o1 + sign * o2), self._get_Usol(s2, o2))
+            M[2, s1, s2, :, :] = numpy.einsum('i,j->ij', self._get_Usol(s1, o2 + sign * o1), self._get_Usol(s2, o1))
         return M
 
     def sampling_points_matsubara(self, whichl):
         """
         Return sampling points in two-fermion-frequency convention
         """
-        sp_f = sampling_points_matsubara(self._Bf, whichl)
-        sp_b = sampling_points_matsubara(self._Bb, whichl)
-        sp = []
-        Nf = len(sp_f)
-        Nb = len(sp_b)
+        sp_o_f = 2 * sampling_points_matsubara(self._Bf, whichl) + 1
+        sp_o_b = 2 * sampling_points_matsubara(self._Bb, whichl)
+        sp_o = []
+        Nf = len(sp_o_f)
+        Nb = len(sp_o_b)
         for s1, s2 in product(range(2), repeat=2):
             for i, j in product(range(Nf), repeat=2):
                 # Fermion, Fermion
-                sp.append((sp_f[i] - s1 * self._m, sp_f[j] - s2 * self._m))
+                sp_o.append((sp_o_f[i] - s1 * self._o, sp_o_f[j] - s2 * self._o))
             for i, j in product(range(Nb), range(Nf)):
                 # Boson, Fermion
-                n2 = sp_f[j] - s2 * self._m
-                n1 = sp_b[i] - s1 * self._m + _sign(s1) * n2
-                sp.append((n1, n2))
-                sp.append((n2, n1))
-        return list(set(sp))
+                o2 = sp_o_f[j] - s2 * self._o
+                o1 = sp_o_b[i] - s1 * self._o + _sign(s1) * o2
+                sp_o.append((o1, o2))
+                sp_o.append((o2, o1))
+
+        # Remove duplicate elements
+        sp_o = list(set(sp_o))
+
+        # From "o" convention to normal Matsubara convention
+        return [(o_to_matsubara_idx_f(p[0]), o_to_matsubara_idx_f(p[1])) for p in sp_o]
+
+    def _get_Usol(self, s, o):
+        if o%2 == 0:
+            # boson
+            return self._get_Usnl_b(s, o_to_matsubara_idx_b(o))
+        else:
+            # fermion
+            return self._get_Usnl_f(s, o_to_matsubara_idx_f(o))
 
     def _get_Usnl_f(self, s, n):
         return self._Bf.compute_Unl([n + s * self._m])[:,0:self._Nl].reshape((self._Nl))

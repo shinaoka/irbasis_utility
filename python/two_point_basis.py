@@ -131,16 +131,18 @@ class Basis(object):
         return self._sl_const * self._b.sl(l)
 
     def Ultau(self, l, tau):
-        # DG: why do we not apply _my_mod(tau, slef._beta) here?
         check_type(l, [int])
         check_type(tau, [float])
-        return self._scale * self._b.ulx(l, 2 * tau / self._beta - 1)
+        t, s = my_mod(tau, self._beta)
+        x = 2 * t / self._beta - 1
+        sign = s if self._stat == 'F' else 1
+        return sign * self._scale * self._b.ulx(l, x)
 
     def Ultau_all_l(self, tau):
         check_type(tau, [float])
-        t, s = _my_mod(tau, self._beta)
+        t, s = my_mod(tau, self._beta)
         x = 2 * t / self._beta - 1
-        sign = s if self._statistics == 'F' else 1
+        sign = s if self._stat == 'F' else 1
         return sign * self._scale * self._b.ulx_all_l(x)
 
     def Vlomega(self, l, omega):
@@ -156,8 +158,9 @@ class Basis(object):
         for i in range(len(nvec_compt)):
             self._Unl_cache[nvec_compt[i]] = numpy.sqrt(self._beta) * unl[i,:self._dim]
 
-    def compute_Unl(self, nvec):
-        self._precompute_Unl(nvec)
+    def compute_Unl(self, nvec, auto_compute=True):
+        if auto_compute:
+            self._precompute_Unl(nvec)
         num_n = len(nvec)
         Unl = numpy.empty((num_n, self.dim), dtype=complex)
         for i in range(num_n):

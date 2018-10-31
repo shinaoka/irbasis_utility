@@ -67,7 +67,7 @@ class TestMethods(unittest.TestCase):
         pole = 0.2 * wmax
 
         n1, n2, n3 = 1, 2, 4
-        n4 = - n1 - n2 - n3
+        n4 = - n1 - n2 - n3 - 2
 
         prj = b4pt.projector_to_matsubara(n1, n2, n3, n4)
 
@@ -100,7 +100,7 @@ class TestMethods(unittest.TestCase):
         n1234_check = []
         niw = 100
         for i, j, k in product(range(-niw, niw, 10), repeat=3):
-            n1234_check.append((i, j, k, - i - j - k))
+            n1234_check.append((i, j, k, - i - j - k - 2))
         prj_check = numpy.array(b4pt.projector_to_matsubara_vec(n1234_check))[:, :, :, :]
         # Test No. 1, 2, 5, 6
         for r in [0, 1, 4, 5]:
