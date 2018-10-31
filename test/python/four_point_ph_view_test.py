@@ -130,13 +130,9 @@ class TestMethods(unittest.TestCase):
         for i, j in product(wide_niw_check, repeat=2):
             n1n2_check.append((i, j))
         prj_check = numpy.array(phb.projector_to_matsubara_vec(n1n2_check))[:, :, :, :, :, :] * S[None, :]
-<<<<<<< HEAD
-        Giwn = numpy.array([_G2_conn_ph(U, beta, n1n2[0], n1n2[1], boson_freq) for n1n2 in sp])
-=======
         Giwn = numpy.array([G2_conn_ph(U, beta, n1n2[0], n1n2[1], boson_freq) for n1n2 in sp])
         noise_iwn = numpy.random.normal(loc=0.0, scale=noise, size=(len(sp)))
         Giwn = noise_iwn + Giwn
->>>>>>> e6f6fa19647cf42b1d3e288c1ff0bfc4ece53f51
         coeffs = ridge_complex(prj_mat, Giwn, alpha).reshape((3, 2, 2, Nl, Nl))
         Giwn_check = numpy.dot(prj_check.reshape((len(n1n2_check), 3 * 2 * 2 * Nl * Nl)),
                                    (coeffs).reshape((3 * 2 * 2 * Nl * Nl)))
