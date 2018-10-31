@@ -7,10 +7,6 @@ from itertools import product, permutations
 from .internal import *
 from .two_point_basis import *
 
-def _sign(s):
-    return 1 if ((s % 2) == 0) else -1
-
-
 # FFF representations (#1-#4)
 idx_n1n2n3_FFF = list()
 idx_n1n2n3_FFF.append(numpy.array((0,1,2))) # (iw_1, i_w2, i_w3)
@@ -135,11 +131,7 @@ class FourPoint(object):
             for p in perms:
                 sp_o.append(tuple(ovec[p]))
 
-        conv = lambda x: \
-            (o_to_matsubara_idx_f(x[0]),\
-               o_to_matsubara_idx_f(x[1]),\
-               o_to_matsubara_idx_f(x[2]),\
-               o_to_matsubara_idx_f(x[3]) )
+        conv = lambda x: tuple(map(o_to_matsubara_idx_f, x))
 
         return list(map(conv, list(set(sp_o))))
 
