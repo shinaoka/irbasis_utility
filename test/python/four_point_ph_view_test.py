@@ -140,9 +140,6 @@ class TestMethods(unittest.TestCase):
         Giwn_check_ref = numpy.array([G2_conn_ph(U, beta, n1n2[0], n1n2[1], boson_freq) for n1n2 in n1n2_check])
         # absolute error
         self.assertLessEqual(numpy.amax(numpy.abs(Giwn_check - Giwn_check_ref)), 1e-3)
-        # try relative error
-        #self.assertLessEqual(numpy.amax(numpy.abs(Giwn_check - Giwn_check_ref) /
-                                            #(numpy.abs(Giwn_check_ref) + numpy.abs(Giwn_check))), 1e-3)
 
         
 if __name__ == '__main__':
