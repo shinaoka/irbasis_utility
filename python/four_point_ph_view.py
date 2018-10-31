@@ -78,8 +78,8 @@ class FourPointPHView(object):
             o_b.append(o1 + o2 + self._o)
             o_b.append(o2 - o1)
             o_b.append(o2 + o1 + self._o)
-        self._Bf._precompute_Unl(map(o_to_matsubara_idx_f, o_f))
-        self._Bb._precompute_Unl(map(o_to_matsubara_idx_b, o_b))
+        self._Bf._precompute_Unl(list(map(o_to_matsubara_idx_f, o_f)))
+        self._Bb._precompute_Unl(list(map(o_to_matsubara_idx_b, o_b)))
 
         r = []
         for i in range(len(n1_n2_vec)):

@@ -84,8 +84,8 @@ class FourPoint(object):
         """
         Return a projector from IR to a Matsubara frequency
         """
-        if n1 + n2 + n3 + n4 != 0:
-            raise RuntimeError("The sum rule for frequencies (n1 + n2 + n3 + n4  = 0) is violated!")
+        if n1 + n2 + n3 + n4 + 2 != 0:
+            raise RuntimeError("The sum rule for frequencies is violated!")
 
         nvec = numpy.array([n1, n2, n3, n4])
 
@@ -108,34 +108,40 @@ class FourPoint(object):
         """
         Return sampling points
         """
-        sp_f = sampling_points_matsubara(self._Bf, whichl)
-        sp_b = sampling_points_matsubara(self._Bb, whichl)
-        sp = []
-        Nf = len(sp_f)
-        Nb = len(sp_b)
+        sp_o_f = 2*sampling_points_matsubara(self._Bf, whichl) + 1
+        sp_o_b = 2*sampling_points_matsubara(self._Bb, whichl)
+        sp_o = []
+        Nf = len(sp_o_f)
+        Nb = len(sp_o_b)
 
-        nvec = numpy.zeros((4), dtype=int)
+        ovec = numpy.zeros((4), dtype=int)
 
         # FFF
-        append_sp = lambda n1, n2, n3 : sp.append((n1, n2, n3, -n1-n2-n3))
+        append_sp = lambda o1, o2, o3 : sp_o.append((o1, o2, o3, -o1-o2-o3))
         for i, j, k in product(range(Nf), repeat=3):
-            nvec[:3] = sp_f[i], sp_f[j], sp_f[k]
-            nvec[3] = - nvec[0] - nvec[1] - nvec[2]
-            append_sp(nvec[0], nvec[1], nvec[2]) # No. 1
-            append_sp(nvec[0], nvec[1], nvec[3]) # No. 2
-            append_sp(nvec[0], nvec[2], nvec[3]) # No. 3
-            append_sp(nvec[1], nvec[2], nvec[3]) # No. 4
+            ovec[:3] = sp_o_f[i], sp_o_f[j], sp_o_f[k]
+            ovec[3] = - ovec[0] - ovec[1] - ovec[2]
+            append_sp(ovec[0], ovec[1], ovec[2]) # No. 1
+            append_sp(ovec[0], ovec[1], ovec[3]) # No. 2
+            append_sp(ovec[0], ovec[2], ovec[3]) # No. 3
+            append_sp(ovec[1], ovec[2], ovec[3]) # No. 4
 
         # FBF
         perms = [numpy.array(p) for p in permutations([0, 1, 2, 3]) if p[0] < p[1]]
         for i, j, k in product(range(Nf), range(Nb), range(Nf)):
-            nf1, nb, nf2 = sp_f[i], sp_b[j], sp_f[k]
-            nvec[0], nvec[1], nvec[3] = nf1, nb - nf1 - 1, -nf2 - 1
-            nvec[2] = - nvec[0] - nvec[1] - nvec[3]
+            of1, ob, of2 = sp_o_f[i], sp_o_b[j], sp_o_f[k]
+            ovec[0], ovec[1], ovec[3] = of1, ob - of1, -of2
+            ovec[2] = - ovec[0] - ovec[1] - ovec[3]
             for p in perms:
-                sp.append(tuple(nvec[p]))
+                sp_o.append(tuple(ovec[p]))
 
-        return list(set(sp))
+        conv = lambda x: \
+            (o_to_matsubara_idx_f(x[0]),\
+               o_to_matsubara_idx_f(x[1]),\
+               o_to_matsubara_idx_f(x[2]),\
+               o_to_matsubara_idx_f(x[3]) )
+
+        return list(map(conv, list(set(sp_o))))
 
     def _get_Unl_f(self, n):
         return self._Bf.compute_Unl([n])[:,0:self._Nl].reshape((self._Nl))
