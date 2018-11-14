@@ -1,6 +1,8 @@
 from __future__ import print_function
 import numpy
 
+# G. Rohringer et al., PRB 86, 125114 (2012)
+
 def _delta(i, j):
     if i==j:
         return 1
@@ -29,6 +31,7 @@ def _F_ph(U, beta, n, np, m):
     Fud = -U + t1 + t2 + t3 + t4
     return Fuu, Fud
 
+# The second term of the right-hand side of Eq. (9)
 def G2_conn_ph(U, beta, n, np, m):
     Fuu, Fud = _F_ph(U, beta, n, np, m)
     nu = (2 * n + 1) * numpy.pi / beta
