@@ -3,6 +3,7 @@ from __future__ import print_function
 import numpy
 import scipy
 import scipy.linalg
+from scipy.sparse.linalg import LinearOperator
 
 class Ridge(object):
     """
@@ -180,6 +181,77 @@ class RidgeComplex(object):
         y_big = y_big.reshape(2 * self._N1)
         x_big = self._ridge_float.fit(y_big, alpha, cutoff).reshape((2, self._N2))
         return x_big[0, :] + 1J * x_big[1, :]
+
+def complex_to_float(a_complex):
+    """
+    Convert complex ndarray object to a float ndarray object of doubled size
+    The index of real and imaginary parts runs most slowly in a_float (left most).
+
+    Parameters
+    ----------
+    a_complex (N1, ..., N_D)
+
+    Returns
+    -------
+    a_float (2 * N1, ..., N_D)
+
+    """
+    a_float = numpy.zeros((2, a_complex.size))
+    a_float[0, :] = a_complex.real
+    a_float[1, :] = a_complex.imag
+    new_shape = (2 * a_complex.shape[0],) + a_complex.shape[1:]
+    return a_float.reshape(new_shape)
+
+def float_to_complex(a_float):
+    """
+    Convert float ndarray object to a complex ndarray object of half size
+    The index of real and imaginary parts runs most slowly in a_float (left most).
+
+    Parameters
+    ----------
+    a_float (2 * N1, N2, ..., N_D)
+
+    Returns
+    -------
+    a_complex (N1, N2, ..., N_D)
+
+    """
+    a_float_reshaped = a_float.reshape((2, -1))
+    a_complex = a_float_reshaped[0, :] + 1J * a_float_reshaped[1, :]
+    new_shape = (int(a_float.shape[0]/2),) + a_float.shape[1:]
+    return a_complex.reshape(new_shape)
+
+class FloatizedLinearOperator:
+    """
+    Convert of LinearOperator of complex to LinearOperator of float dtype
+
+    """
+    def __init__(self, operator_complex):
+        assert isinstance(operator_complex, LinearOperator)
+        assert operator_complex.dtype == complex
+        self._op = operator_complex
+        self._M, self._N = operator_complex.shape
+
+    def matvec(self, v):
+        v_complex = float_to_complex(v).reshape((self._N))
+        return complex_to_float(self._op.matvec(v_complex))
+
+    def rmatvec(self, v):
+        v_complex = float_to_complex(v).reshape((self._M))
+        return complex_to_float(self._op.rmatvec(v_complex))
+
+    def matmat(self, v):
+        v_complex = float_to_complex(v).reshape((self._N, v.shape[1]))
+        return complex_to_float(self._op.matmat(v_complex))
+
+    @property
+    def dtype(self):
+        return float
+
+    @property
+    def shape(self):
+        return (2 * self._M, 2 * self._N)
+
 
 def ridge_svd(X, y, alpha, cutoff = 1e-10):
     N1, N2 = X.shape
