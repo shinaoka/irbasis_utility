@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 import tensorflow as tf
 import tensorflow.contrib.eager as tfe
 
@@ -88,7 +90,7 @@ class OvercompleteGFModel(object):
             assert t.shape == tf.TensorShape([Nw, Nr, linear_dim])
     
         self.y = y
-        self.tensors_A = tensors_A
+        self.tensors_A = [tf.constant(t, dtype=cmplx_dtype) for t in tensors_A]
         self.alpha = alpha
         self.Nw = Nw
         self.Nr = Nr
@@ -127,7 +129,7 @@ class OvercompleteGFModel(object):
         if x_tensors == None:
             x_tensors = self.x_tensors
             
-        ones = tf.constant(np.full((Nw,),1), dtype=cmplx_dtype)
+        ones = tf.constant(np.full((self.Nw,),1), dtype=cmplx_dtype)
         result = tf.einsum('dr,n->nrd', x_tensors[0], ones)
         for i in range(1, self.right_dim):
             UX = tf.einsum('nrl,dl->nrd', self.tensors_A[i-1], x_tensors[i])
@@ -143,10 +145,20 @@ class OvercompleteGFModel(object):
             x_tensors = self.x_tensors
         y_pre = self.predict_y(x_tensors)
         assert self.y.shape == y_pre.shape
-        return (squared_L2_norm(self.y - y_pre) + alpha * squared_L2_norm(self.full_tensor_x(x_tensors)))/self.Nw
+        return (squared_L2_norm(self.y - y_pre) + self.alpha * squared_L2_norm(self.full_tensor_x(x_tensors)))/self.Nw
+
+    def mse(self, x_tensors=None):
+        """
+        Compute mean squared error
+        """
+        if x_tensors == None:
+            x_tensors = self.x_tensors
+        y_pre = self.predict_y(x_tensors)
+        assert self.y.shape == y_pre.shape
+        return (squared_L2_norm(self.y - y_pre))/self.Nw
 
 
-def optimize(model, nite, learning_rate = 0.001, tol_rmse = 1e-5):
+def optimize(model, nite, learning_rate = 0.001, tol_rmse = 1e-5, verbose=0):
     def loss_f():
         loss = model.loss()
         losss.append(loss)
@@ -166,6 +178,8 @@ def optimize(model, nite, learning_rate = 0.001, tol_rmse = 1e-5):
         with tf.GradientTape() as tape:
             loss = loss_f()
         grads = tape.gradient(loss, model.var_list())
+        if verbose > 0 and epoch%10 == 0:
+            print("epoch = ", epoch, " loss = ", loss)
     
         # Simple line search algorithm
         stepsizes = [0.01*learning_rate, 0.1*learning_rate, learning_rate, 10*learning_rate, 100*learning_rate, 1000*learning_rate]
