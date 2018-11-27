@@ -10,11 +10,6 @@ from .two_point_basis import *
 def _sign(s):
     return 1 if ((s % 2) == 0) else -1
 
-#def _A_imp(u1, u2, Nl):
-    #mat1 = numpy.array([u1(l) for l in range(Nl)])
-    #mat2 = numpy.array([u2(l) for l in range(Nl)])
-    #return numpy.einsum('i,j->ij', mat1, mat2)
-
 class FourPointPHView(object):
     def __init__(self, boson_freq, Lambda, beta, cutoff = 1e-8, augmented=True):
         if not isinstance(boson_freq, int):
@@ -51,18 +46,32 @@ class FourPointPHView(object):
     def basis_beta_b(self):
         return self._Bb
 
-    def normalized_S(self):
+    def normalized_S(self, decomposed_form = False):
         Nl = self._Nl
-        svec = numpy.zeros((3, 2, 2, Nl, Nl))
         sf = numpy.array([self._Bf.Sl(l) / self._Bf.Sl(0) for l in range(Nl)])
         sb = numpy.array([self._Bb.Sl(l) / self._Bb.Sl(0) for l in range(Nl)])
-        for s1, s2 in product(range(2), range(2)):
-            svec[0, s1, s2, :, :] = sf[:, None] * sf[None, :]
-            svec[1, s1, s2, :, :] = sb[:, None] * sf[None, :]
-            svec[2, s1, s2, :, :] = sb[:, None] * sf[None, :]
-        return svec
+        if decomposed_form:
+            svec1 = numpy.zeros((3, self._nshift, self._nshift, Nl))
+            svec2 = numpy.zeros((3, self._nshift, self._nshift, Nl))
+            for s1, s2 in product(range(self._nshift), repeat=2):
+                svec1[0, s1, s2, :] = sf[:]
+                svec2[0, s1, s2, :] = sf[:]
 
-    def projector_to_matsubara_vec(self, n1_n2_vec):
+                svec1[1, s1, s2, :] = sb[:]
+                svec2[1, s1, s2, :] = sf[:]
+
+                svec1[2, s1, s2, :] = sb[:]
+                svec2[2, s1, s2, :] = sf[:]
+            return svec1, svec2
+        else:
+            svec = numpy.zeros((3, self._nshift, self._nshift, Nl, Nl))
+            for s1, s2 in product(range(self._nshift), repeat=2):
+                svec[0, s1, s2, :, :] = sf[:, None] * sf[None, :]
+                svec[1, s1, s2, :, :] = sb[:, None] * sf[None, :]
+                svec[2, s1, s2, :, :] = sb[:, None] * sf[None, :]
+            return svec
+
+    def projector_to_matsubara_vec(self, n1_n2_vec, decomposed_form = False):
         """
         Return a projector from IR to Matsubara frequencies
         """
@@ -82,25 +91,49 @@ class FourPointPHView(object):
         self._Bf._precompute_Unl(list(map(o_to_matsubara_idx_f, o_f)))
         self._Bb._precompute_Unl(list(map(o_to_matsubara_idx_b, o_b)))
 
-        r = []
-        for i in range(len(n1_n2_vec)):
-            r.append(self.projector_to_matsubara(n1_n2_vec[i][0], n1_n2_vec[i][1]))
-        return r
+        if decomposed_form:
+            nw = len(n1_n2_vec)
+            r = [numpy.zeros((nw, 3, self._nshift, self._nshift, self._Nl), dtype=complex) for i in range(2)]
+            for i in range(len(n1_n2_vec)):
+                # M1 (3, nshift, nshift, Nl)
+                # M2 (3, nshift, nshift, Nl)
+                M1, M2 = self.projector_to_matsubara(n1_n2_vec[i][0], n1_n2_vec[i][1], True)
+                r[0][i, :, :, :, :] = M1
+                r[1][i, :, :, :, :] = M2
+            return r
+        else:
+            r = []
+            for i in range(len(n1_n2_vec)):
+                r.append(self.projector_to_matsubara(n1_n2_vec[i][0], n1_n2_vec[i][1], False))
+            return r
 
-    def projector_to_matsubara(self, n1, n2):
+    def projector_to_matsubara(self, n1, n2, decomposed_form = False):
         """
         Return a projector from IR to a Matsubara frequency
         """
         o1, o2 = 2*n1 + 1, 2*n2 + 1
-        M = numpy.zeros((3, self._nshift, self._nshift, self._Nl, self._Nl), dtype=complex)
-        for s1, s2 in product(range(self._nshift), repeat=2):
-            sign = -1 * _sign(s1)
-            # Note: with this signature, einsum does not actually perform any summation
-            # HS: may be better to write like A[:, None] * B[None, :] ?
-            M[0, s1, s2, :, :] = numpy.einsum('i,j->ij', self._get_Usol(s1, o1),             self._get_Usol(s2, o2))
-            M[1, s1, s2, :, :] = numpy.einsum('i,j->ij', self._get_Usol(s1, o1 + sign * o2), self._get_Usol(s2, o2))
-            M[2, s1, s2, :, :] = numpy.einsum('i,j->ij', self._get_Usol(s1, o2 + sign * o1), self._get_Usol(s2, o1))
-        return M
+        if decomposed_form:
+            M1 = numpy.zeros((3, self._nshift, self._nshift, self._Nl), dtype=complex)
+            M2 = numpy.zeros((3, self._nshift, self._nshift, self._Nl), dtype=complex)
+            for s1, s2 in product(range(self._nshift), repeat=2):
+                sign = -1 * _sign(s1)
+                M1[0, s1, s2, :] = self._get_Usol(s1, o1)
+                M2[0, s1, s2, :] = self._get_Usol(s2, o2)
+
+                M1[1, s1, s2, :] = self._get_Usol(s1, o1 + sign * o2)
+                M2[1, s1, s2, :] = self._get_Usol(s2, o2)
+
+                M1[2, s1, s2, :] = self._get_Usol(s1, o2 + sign * o1)
+                M2[2, s1, s2, :] = self._get_Usol(s2, o1)
+            return M1, M2
+        else:
+            M = numpy.zeros((3, self._nshift, self._nshift, self._Nl, self._Nl), dtype=complex)
+            for s1, s2 in product(range(self._nshift), repeat=2):
+                sign = -1 * _sign(s1)
+                M[0, s1, s2, :, :] = self._get_Usol(s1, o1)[:, None]             * self._get_Usol(s2, o2)[None, :]
+                M[1, s1, s2, :, :] = self._get_Usol(s1, o1 + sign * o2)[:, None] * self._get_Usol(s2, o2)[None, :]
+                M[2, s1, s2, :, :] = self._get_Usol(s1, o2 + sign * o1)[:, None] * self._get_Usol(s2, o1)[None, :]
+            return M
 
     def sampling_points_matsubara(self, whichl):
         """

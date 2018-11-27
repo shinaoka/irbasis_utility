@@ -67,6 +67,30 @@ class TestMethods(unittest.TestCase):
                 Giwn = numpy.sum(prj * coeffs)
                 self.assertLessEqual(numpy.abs(Giwn_ref/Giwn - 1), 1e-7)
 
+    def test_projectors(self):
+        boson_freq = 10
+        Lambda = 10.0
+        beta = 0.2
+        alpha = 1e-15
+        augmented = True
+        wmax = Lambda / beta
+        phb = FourPointPHView(boson_freq, Lambda, beta, 1e-5, augmented)
+        Nl = phb.Nl
+        whichl = Nl - 1
+        pole = 0.2 * wmax
+        # build the sampling frequency structure
+        sp = [(0,0), (0,1), (1,0)]
+        S = phb.normalized_S()
+        n_sp = len(sp)
+        # prj: (n_sp, 3, 2, 2, Nl, Nl)
+        prj = numpy.array(phb.projector_to_matsubara_vec(sp, decomposed_form=False))
+
+        # prj_decomposed: [(n_sp, 3, 2, 2, Nl), (n_sp, 3, 2, 2, Nl)]
+        prj_decomposed = numpy.array(phb.projector_to_matsubara_vec(sp, decomposed_form=True))
+        prj_composed = numpy.einsum('nijkl,nijkm->nijklm', prj_decomposed[0], prj_decomposed[1])
+
+        self.assertTrue(numpy.allclose(prj, prj_composed, atol = 1e-10))
+
     def test_sampling_points_matsubara(self):
         boson_freq = 10
         Lambda = 10.0
