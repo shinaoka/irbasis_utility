@@ -80,16 +80,21 @@ class TestMethods(unittest.TestCase):
         pole = 0.2 * wmax
         # build the sampling frequency structure
         sp = [(0,0), (0,1), (1,0)]
-        S = phb.normalized_S()
         n_sp = len(sp)
-        # prj: (n_sp, 3, 2, 2, Nl, Nl)
-        prj = numpy.array(phb.projector_to_matsubara_vec(sp, decomposed_form=False))
 
+        # prj: (n_sp, 3, 2, 2, Nl, Nl)
         # prj_decomposed: [(n_sp, 3, 2, 2, Nl), (n_sp, 3, 2, 2, Nl)]
+        prj = numpy.array(phb.projector_to_matsubara_vec(sp, decomposed_form=False))
         prj_decomposed = numpy.array(phb.projector_to_matsubara_vec(sp, decomposed_form=True))
         prj_composed = numpy.einsum('nijkl,nijkm->nijklm', prj_decomposed[0], prj_decomposed[1])
-
         self.assertTrue(numpy.allclose(prj, prj_composed, atol = 1e-10))
+
+        # S: (3, self._nshift, self._nshift, Nl, Nl)
+        # S_decomposed: [(3, self._nshift, self._nshift, Nl), (3, self._nshift, self._nshift, Nl)]
+        S = phb.normalized_S(decomposed_form=False)
+        S_decomposed = phb.normalized_S(decomposed_form=True)
+        S_composed = numpy.einsum('nijk,nijl->nijkl', S_decomposed[0], S_decomposed[1])
+        self.assertTrue(numpy.allclose(S, S_composed, atol = 1e-10))
 
     def test_sampling_points_matsubara(self):
         boson_freq = 10
