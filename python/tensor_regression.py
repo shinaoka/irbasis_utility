@@ -89,7 +89,7 @@ class OvercompleteGFModel(object):
         for t in tensors_A:
             assert t.shape == tf.TensorShape([Nw, Nr, linear_dim])
     
-        self.y = y
+        self.y = tf.constant(y, dtype=cmplx_dtype)
         self.tensors_A = [tf.constant(t, dtype=cmplx_dtype) for t in tensors_A]
         self.alpha = alpha
         self.Nw = Nw
