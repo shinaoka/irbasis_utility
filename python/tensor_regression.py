@@ -169,6 +169,9 @@ def optimize(model, nite, learning_rate = 0.001, tol_rmse = 1e-5, verbose=0):
         for i in range(len(var_list)):
             var_list[i].assign_sub(stepsize * grads[i])
         return model.loss(var_list)
+
+    current_learning_rate = learning_rate
+    learning_rate_fact = 10.0
         
     losss = []
     diff_losss = []
@@ -182,14 +185,29 @@ def optimize(model, nite, learning_rate = 0.001, tol_rmse = 1e-5, verbose=0):
             print("epoch = ", epoch, " loss = ", loss)
     
         # Simple line search algorithm
-        stepsizes = [0.01*learning_rate, 0.1*learning_rate, learning_rate, 10*learning_rate, 100*learning_rate, 1000*learning_rate]
+        #stepsizes = [0.01*learning_rate, 0.1*learning_rate, learning_rate, 10*learning_rate, 100*learning_rate, 1000*learning_rate]
+        stepsizes = [current_learning_rate]
         losss_ls = {}
-        for s in stepsizes:
-            if not s in losss_ls:
-                losss_ls[s] = evaluate_loss(model, grads, s)
-        opt_stepsize = min(losss_ls, key = lambda x: losss_ls.get(x))
-    
+        while True:
+            for s in stepsizes:
+                if not s in losss_ls:
+                    losss_ls[s] = evaluate_loss(model, grads, s).numpy()
+            opt_stepsize = min(losss_ls, key = lambda x: losss_ls.get(x))
+            opt_loss = losss_ls[opt_stepsize]
+            #print(loss, opt_loss, opt_stepsize, losss_ls)
+
+            if opt_loss > loss:
+                # step sizes are too big.
+                stepsizes.append(np.amin(stepsizes) / learning_rate_fact)
+            elif opt_stepsize == np.amax(stepsizes):
+                # There is a chance to use a larger step size
+                stepsizes.append(np.amax(stepsizes) * learning_rate_fact)
+            else:
+                break
+
         # Update x
+        #print("debug ", epoch, loss.numpy(), opt_stepsize)
+        current_learning_rate = opt_stepsize
         var_list = model.var_list()
         for i in range(len(var_list)):
             var_list[i].assign_sub(opt_stepsize * grads[i])
