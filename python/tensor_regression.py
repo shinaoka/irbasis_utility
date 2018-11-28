@@ -183,7 +183,7 @@ def optimize(model, nite, learning_rate = 0.001, tol_rmse = 1e-5, verbose=0):
         grads = tape.gradient(loss, model.var_list())
         if verbose > 0 and epoch%10 == 0:
             print("epoch = ", epoch, " loss = ", loss)
-    
+
         # Simple line search algorithm
         #stepsizes = [0.01*learning_rate, 0.1*learning_rate, learning_rate, 10*learning_rate, 100*learning_rate, 1000*learning_rate]
         stepsizes = [current_learning_rate]
@@ -216,6 +216,48 @@ def optimize(model, nite, learning_rate = 0.001, tol_rmse = 1e-5, verbose=0):
             diff_losss.append(np.abs(losss[-2] - losss[-1]))
             if losss[-1] < tol_rmse**2 or np.abs(losss[-2] - losss[-1]) < tol_rmse**2:
                 break
+
+    info = {}
+    info['losss'] = losss
+
+    return info
+
+def optimize_adam(model, nite, learning_rate = 0.001, tol_rmse = 1e-5, verbose=0):
+    def loss_f():
+        var_list = [tf.complex(re,im) for re, im in zip(var_re_list, var_im_list)]
+        loss = model.loss(var_list)
+        losss.append(loss)
+        return loss
+
+    def evaluate_loss(model, grads, stepsize):
+        var_list = [tf.Variable(v) for v in model.var_list()]
+        for i in range(len(var_list)):
+            var_list[i].assign_sub(stepsize * grads[i])
+        return model.loss(var_list)
+
+    optimizer = tf.train.AdamOptimizer(1.0)
+
+    var_re_list = [tf.Variable(tf.real(v)) for v in model.var_list()]
+    var_im_list = [tf.Variable(tf.imag(v)) for v in model.var_list()]
+
+    losss = []
+    diff_losss = []
+    epochs = range(nite)
+    for epoch in epochs:
+        # Compute gradients
+        grads_and_vars = optimizer.compute_gradients(loss_f, var_re_list + var_im_list)
+        optimizer.apply_gradients(grads_and_vars)
+        print("epoch_adam = ", epoch, " loss = ", losss[-1])
+        if verbose > 0 and epoch%10 == 0:
+            print("epoch = ", epoch, " loss = ", losss[-1])
+
+        if len(losss) > 2:
+            diff_losss.append(np.abs(losss[-2] - losss[-1]))
+            if losss[-1] < tol_rmse**2 or np.abs(losss[-2] - losss[-1]) < tol_rmse**2:
+                break
+
+    for v, v_opt_re, v_opt_im in zip(model.var_list(), var_re_list, var_im_list):
+        v.assign(tf.complex(v_opt_re, v_opt_im))
 
     info = {}
     info['losss'] = losss

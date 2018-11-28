@@ -47,5 +47,27 @@ class TestMethods(unittest.TestCase):
 
         self.assertLess(numpy.abs(info['losss'][-1] - info['losss'][-2]), 1e-10)
 
+    def test_adam(self):
+        numpy.random.seed(100)
+
+        Nw = 100
+        Nr = 2
+        linear_dim = 2
+        freq_dim = 2
+
+        def create_tensor_3(N, M, L):
+            rand = numpy.random.rand(N, M, L) + 1J * numpy.random.rand(N, M, L)
+            return tf.constant(rand, dtype=cmplx_dtype)
+
+        tensors_A = [create_tensor_3(Nw, Nr, linear_dim) for i in range(freq_dim)]
+        y = tf.constant(numpy.random.randn(Nw) + 1J * numpy.random.randn(Nw), dtype=cmplx_dtype)
+        alpha = 0.1
+        D = 20
+
+        model = OvercompleteGFModel(Nw, Nr, freq_dim, linear_dim, tensors_A, y, alpha, D)
+
+        info = optimize_adam(model, nite = 1000, learning_rate=0.001, tol_rmse=1e-5, verbose=0)
+
+
 if __name__ == '__main__':
     unittest.main()
