@@ -3,6 +3,8 @@ from __future__ import print_function
 import tensorflow as tf
 import tensorflow.contrib.eager as tfe
 
+from .regression import ridge_complex
+
 tfe.enable_eager_execution()
 
 import numpy as np
@@ -94,6 +96,7 @@ class OvercompleteGFModel(object):
         self.alpha = alpha
         self.Nw = Nw
         self.Nr = Nr
+        self.linear_dim = linear_dim
         self.freq_dim = freq_dim
         self.D = D
     
@@ -145,7 +148,11 @@ class OvercompleteGFModel(object):
             x_tensors = self.x_tensors
         y_pre = self.predict_y(x_tensors)
         assert self.y.shape == y_pre.shape
-        return (squared_L2_norm(self.y - y_pre) + self.alpha * squared_L2_norm(self.full_tensor_x(x_tensors)))/self.Nw
+
+        r = squared_L2_norm(self.y - y_pre)
+        for t in x_tensors:
+            r += self.alpha * squared_L2_norm(t)
+        return r/self.Nw
 
     def mse(self, x_tensors=None):
         """
@@ -182,8 +189,8 @@ def optimize(model, nite, learning_rate = 0.001, tol_rmse = 1e-5, verbose=0):
             loss = loss_f()
         grads = tape.gradient(loss, model.var_list())
         if verbose > 0 and epoch%10 == 0:
-            print("epoch = ", epoch, " loss = ", loss)
-
+            print("epoch = ", epoch, " loss = ", loss.numpy(), " mse=", model.mse().numpy())
+    
         # Simple line search algorithm
         #stepsizes = [0.01*learning_rate, 0.1*learning_rate, learning_rate, 10*learning_rate, 100*learning_rate, 1000*learning_rate]
         stepsizes = [current_learning_rate]
@@ -222,32 +229,77 @@ def optimize(model, nite, learning_rate = 0.001, tol_rmse = 1e-5, verbose=0):
 
     return info
 
-def optimize_adam(model, nite, learning_rate = 0.001, tol_rmse = 1e-5, verbose=0):
-    def loss_f():
-        var_list = [tf.complex(re,im) for re, im in zip(var_re_list, var_im_list)]
-        loss = model.loss(var_list)
-        losss.append(loss)
-        return loss
+def ridge_complex_tf(N1, N2, A, y, alpha, x_old):
+    # TODO: remove CPU code
+    A_numpy = A.numpy().reshape((N1, N2))
+    y_numpy = y.numpy().reshape((N1,))
+    x_old_numpy = x_old.numpy().reshape((N2,))
 
-    def evaluate_loss(model, grads, stepsize):
-        var_list = [tf.Variable(v) for v in model.var_list()]
-        for i in range(len(var_list)):
-            var_list[i].assign_sub(stepsize * grads[i])
-        return model.loss(var_list)
+    x_numpy = ridge_complex(A_numpy, y_numpy, alpha)
+    x = tf.constant(x_numpy, dtype=cmplx_dtype)
 
-    optimizer = tf.train.AdamOptimizer(1.0)
+    loss_diff =  np.linalg.norm(y_numpy - np.dot(A_numpy, x_numpy))**2 \
+                 - np.linalg.norm(y_numpy - np.dot(A_numpy, x_old_numpy))**2 \
+                 + alpha * np.linalg.norm(x_numpy)**2 \
+                 - alpha * np.linalg.norm(x_old_numpy)**2
 
-    var_re_list = [tf.Variable(tf.real(v)) for v in model.var_list()]
-    var_im_list = [tf.Variable(tf.imag(v)) for v in model.var_list()]
+    return x, loss_diff/N1
+
+
+def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0):
+    def update_core_tensor():
+        """
+        Build a least squares model for optimizing core tensor
+        """
+        # TODO: remove np.full()
+        A_lsm = tf.constant(np.full((model.Nw, model.Nr, model.D),1), dtype=cmplx_dtype)
+        for i in range(model.freq_dim):
+            UX = tf.einsum('nrl,dl->nrd', model.tensors_A[i], model.x_tensors[i+1])
+            A_lsm = tf.multiply(A_lsm , UX)
+
+        # Reshape A_lsm as (Nw, R, D) to (Nw, D, R)
+        A_lsm = tf.transpose(A_lsm, [0, 2, 1])
+        # This should be
+        new_core_tensor, diff = ridge_complex_tf(model.Nw, model.D * model.Nr, A_lsm, model.y, model.alpha, model.x_tensors[0])
+        new_core_tensor = tf.reshape(new_core_tensor, [model.D, model.Nr])
+        tf.assign(model.x_tensors[0], new_core_tensor)
+
+        return diff
+
+    def update_l_tensor(pos):
+        assert pos > 0
+
+        # TODO: remove np.full()
+        UX_prod = tf.constant(np.full((model.Nw, model.Nr, model.D),1), dtype=cmplx_dtype)
+        for i in range(model.freq_dim):
+            if i + 1 == pos:
+                continue
+            UX = tf.einsum('nrl,dl->nrd', model.tensors_A[i], model.x_tensors[i+1])
+            UX_prod = tf.multiply(UX_prod , UX)
+        # Core tensor
+        UX_prod = tf.einsum('nrd,dr->nrd', UX_prod, model.x_tensors[0])
+        A_lsm = tf.reduce_sum(tf.einsum('nrd,nrl->nrdl', UX_prod, model.tensors_A[pos-1]), axis=1)
+        # At this point, A_lsm is shape of (Nw, D, Nl)
+        new_tensor, diff = ridge_complex_tf(model.Nw, model.D*model.linear_dim, A_lsm, model.y, model.alpha, model.x_tensors[pos])
+        tf.assign(model.x_tensors[pos], tf.reshape(new_tensor, [model.D, model.linear_dim]))
+
+        return diff
 
     losss = []
     diff_losss = []
     epochs = range(nite)
+    loss = model.loss().numpy()
     for epoch in epochs:
-        # Compute gradients
-        grads_and_vars = optimizer.compute_gradients(loss_f, var_re_list + var_im_list)
-        optimizer.apply_gradients(grads_and_vars)
-        print("epoch_adam = ", epoch, " loss = ", losss[-1])
+        # Optimize core tensor
+        loss += update_core_tensor()
+
+        # Optimize the other tensors
+        for pos in range(1, model.freq_dim+1):
+            loss += update_l_tensor(pos)
+
+        losss.append(loss)
+
+        print("epoch = ", epoch, " loss = ", losss[-1])
         if verbose > 0 and epoch%10 == 0:
             print("epoch = ", epoch, " loss = ", losss[-1])
 
@@ -256,10 +308,8 @@ def optimize_adam(model, nite, learning_rate = 0.001, tol_rmse = 1e-5, verbose=0
             if losss[-1] < tol_rmse**2 or np.abs(losss[-2] - losss[-1]) < tol_rmse**2:
                 break
 
-    for v, v_opt_re, v_opt_im in zip(model.var_list(), var_re_list, var_im_list):
-        v.assign(tf.complex(v_opt_re, v_opt_im))
-
     info = {}
     info['losss'] = losss
 
     return info
+

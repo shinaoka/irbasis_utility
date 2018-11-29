@@ -45,9 +45,9 @@ class TestMethods(unittest.TestCase):
 
         info = optimize(model, nite = 1000, learning_rate=0.001, tol_rmse=1e-5, verbose=0)
 
-        self.assertLess(numpy.abs(info['losss'][-1] - info['losss'][-2]), 1e-10)
+        self.assertLess(numpy.abs(info['losss'][-1] - info['losss'][-2]), 1e-6)
 
-    def test_adam(self):
+    def test_als(self):
         numpy.random.seed(100)
 
         Nw = 100
@@ -66,7 +66,9 @@ class TestMethods(unittest.TestCase):
 
         model = OvercompleteGFModel(Nw, Nr, freq_dim, linear_dim, tensors_A, y, alpha, D)
 
-        info = optimize_adam(model, nite = 1000, learning_rate=0.001, tol_rmse=1e-5, verbose=0)
+        info = optimize_als(model, nite = 1000, verbose=0)
+
+        self.assertLess(numpy.abs(info['losss'][-1] - info['losss'][-2]), 1e-10)
 
 
 if __name__ == '__main__':
