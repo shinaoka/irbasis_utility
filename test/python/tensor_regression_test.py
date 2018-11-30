@@ -52,6 +52,7 @@ class TestMethods(unittest.TestCase):
             model = OvercompleteGFModel(Nw, Nr, freq_dim, linear_dim, tensors_A, y, alpha, D)
             info = optimize_als(model, nite = 1000, verbose=0, solver=solver)
 
+            print("loss", info['losss'][-1])
             self.assertLess(numpy.abs(info['losss'][-1] - info['losss'][-2]), 1e-10)
 
 

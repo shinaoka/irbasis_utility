@@ -235,9 +235,10 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, precond=
         # This should be
         new_core_tensor, diff = ridge_complex_tf(model.Nw, model.D * model.Nr, A_lsm, model.y, model.alpha, model.x_tensors[0], solver)
         new_core_tensor = tf.reshape(new_core_tensor, [model.D, model.Nr])
-        new_core_tensor, norm = __normalize_tensor(new_core_tensor)
 
-        model.coeff.assign(model.coeff * norm)
+        #new_core_tensor, norm = __normalize_tensor(new_core_tensor)
+        #model.coeff.assign(model.coeff * norm)
+
         tf.assign(model.x_tensors[0], new_core_tensor)
 
         return diff
@@ -259,8 +260,10 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, precond=
         # At this point, A_lsm is shape of (Nw, D, Nl)
         new_tensor, diff = ridge_complex_tf(model.Nw, model.D*model.linear_dim, A_lsm, model.y, model.alpha, model.x_tensors[pos], solver)
         new_tensor = tf.reshape(new_tensor, [model.D, model.linear_dim])
-        new_tensor, norm = __normalize_tensor(new_tensor)
-        model.coeff.assign(model.coeff * norm)
+
+        #new_tensor, norm = __normalize_tensor(new_tensor)
+        #model.coeff.assign(model.coeff * norm)
+
         tf.assign(model.x_tensors[pos], new_tensor)
 
         return diff
@@ -273,8 +276,8 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, precond=
         # Optimize core tensor
         loss += update_core_tensor()
 
-        for x in model.x_tensors:
-            print("norm of x ", tf.norm(x))
+        #for x in model.x_tensors:
+            #print("norm of x ", tf.norm(x))
 
         assert not loss is None
         assert loss >= 0
@@ -288,9 +291,11 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, precond=
 
         losss.append(loss)
 
-        print("epoch = ", epoch, " loss = ", losss[-1], " rmse = ", np.sqrt(model.mse()), model.coeff.numpy())
+        #print("epoch = ", epoch, " loss = ", losss[-1], " rmse = ", np.sqrt(model.mse()), model.coeff.numpy())
         if verbose > 0 and epoch%20 == 0:
             print("epoch = ", epoch, " loss = ", losss[-1], " rmse = ", np.sqrt(model.mse()), model.coeff.numpy())
+            for i, x in enumerate(model.x_tensors):
+                print("norm of x ", i, tf.norm(x).numpy())
 
         if len(losss) > 2:
             diff_losss.append(np.abs(losss[-2] - losss[-1]))
