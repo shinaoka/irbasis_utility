@@ -8,6 +8,7 @@ from .regression import ridge_complex
 tfe.enable_eager_execution()
 
 import numpy as np
+import scipy
 from itertools import *
 
 real_dtype = tf.float64
@@ -188,12 +189,18 @@ def ridge_complex_tf(N1, N2, A, y, alpha, x_old, solver='svd', precond=None):
     y_numpy = y.numpy().reshape((N1,))
     x_old_numpy = x_old.numpy().reshape((N2,))
 
-    if solver == 'svd':
-        x_numpy = ridge_complex(A_numpy, y_numpy, alpha, solver='svd')
-    elif solver == 'lsqr':
-        x_numpy = ridge_complex(A_numpy, y_numpy, alpha, solver='lsqr', precond=precond)
-    else:
-        raise RuntimeError("Unsupported solver: " + solver)
+    try:
+        if solver == 'svd':
+            x_numpy = ridge_complex(A_numpy, y_numpy, alpha, solver='svd')
+        elif solver == 'lsqr':
+            x_numpy = ridge_complex(A_numpy, y_numpy, alpha, solver='lsqr', x0=x_old_numpy, precond=precond, verbose=1)
+        else:
+            raise RuntimeError("Unsupported solver: " + solver)
+    except:
+        print("A: ", A_numpy)
+        print("y: ", y_numpy)
+        print("alpha: ", alpha)
+        raise RuntimeError("Error in ridge_complex")
 
     x = tf.constant(x_numpy, dtype=cmplx_dtype)
 
@@ -203,11 +210,14 @@ def ridge_complex_tf(N1, N2, A, y, alpha, x_old, solver='svd', precond=None):
                  - alpha * np.linalg.norm(x_old_numpy)**2
 
     if loss_diff > 0:
-        print(np.linalg.norm(y_numpy - np.dot(A_numpy, x_numpy))**2)
-        print(np.linalg.norm(y_numpy - np.dot(A_numpy, x_old_numpy))**2)
-        print(alpha * np.linalg.norm(x_numpy)**2)
-        print(alpha * np.linalg.norm(x_old_numpy)**2)
-    assert loss_diff <= 0
+        U, S, V = scipy.linalg.svd(A_numpy)
+        print("Warning loss_diff > 0!: loss_diff = ", loss_diff)
+        print("    condA", S[0]/S[-1], S[0], S[-1])
+        print("    ", np.linalg.norm(y_numpy - np.dot(A_numpy, x_numpy))**2)
+        print("    ", np.linalg.norm(y_numpy - np.dot(A_numpy, x_old_numpy))**2)
+        print("    ", alpha * np.linalg.norm(x_numpy)**2)
+        print("    ", alpha * np.linalg.norm(x_old_numpy)**2)
+    #assert loss_diff <= 0
 
     return x, loss_diff/N1
 
@@ -269,9 +279,9 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, precond=
         return diff
 
     losss = []
-    diff_losss = []
     epochs = range(nite)
     loss = model.loss().numpy()
+    rmses = []
     for epoch in epochs:
         # Optimize core tensor
         loss += update_core_tensor()
@@ -280,26 +290,28 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, precond=
             #print("norm of x ", tf.norm(x))
 
         assert not loss is None
-        assert loss >= 0
+        #assert loss >= 0
 
         # Optimize the other tensors
         for pos in range(1, model.freq_dim+1):
             loss += update_l_tensor(pos)
 
             assert not loss is None
-            assert loss >= 0
+            #assert loss >= 0
 
         losss.append(loss)
 
-        #print("epoch = ", epoch, " loss = ", losss[-1], " rmse = ", np.sqrt(model.mse()), model.coeff.numpy())
-        if verbose > 0 and epoch%20 == 0:
-            print("epoch = ", epoch, " loss = ", losss[-1], " rmse = ", np.sqrt(model.mse()), model.coeff.numpy())
-            for i, x in enumerate(model.x_tensors):
-                print("norm of x ", i, tf.norm(x).numpy())
+        if epoch%20 == 0:
+            loss = model.loss().numpy()
+            rmses.append(np.sqrt(model.mse()))
+            if verbose > 0:
+                print("epoch = ", epoch, " loss = ", losss[-1], " rmse = ", rmses[-1], " coeff = ", model.coeff.numpy())
+                for i, x in enumerate(model.x_tensors):
+                    print("norm of x ", i, tf.norm(x).numpy())
 
-        if len(losss) > 2:
-            diff_losss.append(np.abs(losss[-2] - losss[-1]))
-            if losss[-1] < tol_rmse**2 or np.abs(losss[-2] - losss[-1]) < tol_rmse**2:
+        if len(rmses) > 2:
+            diff_rmse = np.abs(rmses[-2] - rmses[-1])
+            if diff_rmse < tol_rmse:
                 break
 
     info = {}
