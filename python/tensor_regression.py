@@ -105,19 +105,21 @@ class OvercompleteGFModel(object):
             return tf.Variable(rand, dtype=cmplx_dtype)
     
         self.x_tensors = [create_tensor(D, self.right_dims[i]) for i in range(self.right_dim)]
+        self.coeff = tf.Variable(1.0, dtype=real_dtype)
 
     def var_list(self):
         """
         Return a list of model parameters
         """
-        return self.x_tensors
+        return [self.x_tensors + self.coeff]
 
-    def full_tensor_x(self, x_tensors=None):
-        if x_tensors == None:
-            x_tensors = self.x_tensors
-        return cp_to_full_tensor(x_tensors)
+    def full_tensor_x(self, x_tensors_plus_coeff=None):
+        if x_tensors_plus_coeff == None:
+            return self.coeff * cp_to_full_tensor(self.x_tensors)
+        else:
+            return x_tensors_plus_coeff[-1] * cp_to_full_tensor(x_tensors_plus_coeff[:-1])
 
-    def predict_y(self, x_tensors=None):
+    def predict_y(self, x_tensors_plus_coeff=None):
         """
         Predict y from self.x_tensors
     
@@ -129,113 +131,69 @@ class OvercompleteGFModel(object):
             U_1(n, r, l1) * X_1(d, l1) -> UX_1(n, r, d)
             U_2(n, r, l2) * X_2(d, l2) -> UX_2(n, r, d)
         """
-        if x_tensors == None:
+        if x_tensors_plus_coeff == None:
             x_tensors = self.x_tensors
-            
+            coeff = self.coeff
+        else:
+            x_tensors =x_tensors_plus_coeff[:-1]
+            coeff = x_tensors_plus_coeff[-1]
+
         ones = tf.constant(np.full((self.Nw,),1), dtype=cmplx_dtype)
         result = tf.einsum('dr,n->nrd', x_tensors[0], ones)
         for i in range(1, self.right_dim):
             UX = tf.einsum('nrl,dl->nrd', self.tensors_A[i-1], x_tensors[i])
             result = tf.multiply(result, UX)
         # At this point, "result" is shape of (Nw, Nr, D).
-        return tf.reduce_sum(result, axis = [1, 2])
+        return tf.cast(coeff, dtype=cmplx_dtype) * tf.reduce_sum(result, axis = [1, 2])
 
-    def loss(self, x_tensors=None):
+    def loss(self, x_tensors_plus_coeff=None):
         """
         Compute mean squared error + L2 regularization term
         """
-        if x_tensors == None:
+        if x_tensors_plus_coeff == None:
             x_tensors = self.x_tensors
-        y_pre = self.predict_y(x_tensors)
+            coeff = self.coeff
+        else:
+            x_tensors =x_tensors_plus_coeff[:-1]
+            coeff = x_tensors_plus_coeff[-1]
+
+        y_pre = self.predict_y(x_tensors + [coeff])
         assert self.y.shape == y_pre.shape
 
         r = squared_L2_norm(self.y - y_pre)
         for t in x_tensors:
-            r += self.alpha * squared_L2_norm(t)
+            r += (coeff**2) * self.alpha * squared_L2_norm(t)
         return r/self.Nw
 
-    def mse(self, x_tensors=None):
+    def mse(self, x_tensors_plus_coeff=None):
         """
         Compute mean squared error
         """
-        if x_tensors == None:
+        if x_tensors_plus_coeff == None:
             x_tensors = self.x_tensors
-        y_pre = self.predict_y(x_tensors)
+            coeff = self.coeff
+        else:
+            x_tensors = x_tensors_plus_coeff[:-1]
+            coeff = x_tensors_plus_coeff[-1]
+
+        y_pre = self.predict_y(x_tensors + [coeff])
         assert self.y.shape == y_pre.shape
         return (squared_L2_norm(self.y - y_pre))/self.Nw
 
 
-def optimize(model, nite, learning_rate = 0.001, tol_rmse = 1e-5, verbose=0):
-    def loss_f():
-        loss = model.loss()
-        losss.append(loss)
-        return loss
-    
-    def evaluate_loss(model, grads, stepsize):
-        var_list = [tf.Variable(v) for v in model.var_list()]
-        for i in range(len(var_list)):
-            var_list[i].assign_sub(stepsize * grads[i])
-        return model.loss(var_list)
-
-    current_learning_rate = learning_rate
-    learning_rate_fact = 10.0
-        
-    losss = []
-    diff_losss = []
-    epochs = range(nite)
-    for epoch in epochs:
-        # Compute gradients
-        with tf.GradientTape() as tape:
-            loss = loss_f()
-        grads = tape.gradient(loss, model.var_list())
-        if verbose > 0 and epoch%10 == 0:
-            print("epoch = ", epoch, " loss = ", loss.numpy(), " mse=", model.mse().numpy())
-    
-        # Simple line search algorithm
-        #stepsizes = [0.01*learning_rate, 0.1*learning_rate, learning_rate, 10*learning_rate, 100*learning_rate, 1000*learning_rate]
-        stepsizes = [current_learning_rate]
-        losss_ls = {}
-        while True:
-            for s in stepsizes:
-                if not s in losss_ls:
-                    losss_ls[s] = evaluate_loss(model, grads, s).numpy()
-            opt_stepsize = min(losss_ls, key = lambda x: losss_ls.get(x))
-            opt_loss = losss_ls[opt_stepsize]
-            #print(loss, opt_loss, opt_stepsize, losss_ls)
-
-            if opt_loss > loss:
-                # step sizes are too big.
-                stepsizes.append(np.amin(stepsizes) / learning_rate_fact)
-            elif opt_stepsize == np.amax(stepsizes):
-                # There is a chance to use a larger step size
-                stepsizes.append(np.amax(stepsizes) * learning_rate_fact)
-            else:
-                break
-
-        # Update x
-        #print("debug ", epoch, loss.numpy(), opt_stepsize)
-        current_learning_rate = opt_stepsize
-        var_list = model.var_list()
-        for i in range(len(var_list)):
-            var_list[i].assign_sub(opt_stepsize * grads[i])
-    
-        if len(losss) > 2:
-            diff_losss.append(np.abs(losss[-2] - losss[-1]))
-            if losss[-1] < tol_rmse**2 or np.abs(losss[-2] - losss[-1]) < tol_rmse**2:
-                break
-
-    info = {}
-    info['losss'] = losss
-
-    return info
-
-def ridge_complex_tf(N1, N2, A, y, alpha, x_old):
+def ridge_complex_tf(N1, N2, A, y, alpha, x_old, solver='svd'):
     # TODO: remove CPU code
     A_numpy = A.numpy().reshape((N1, N2))
     y_numpy = y.numpy().reshape((N1,))
     x_old_numpy = x_old.numpy().reshape((N2,))
 
-    x_numpy = ridge_complex(A_numpy, y_numpy, alpha)
+    if solver == 'svd':
+        x_numpy = ridge_complex(A_numpy, y_numpy, alpha, solver='svd')
+    elif solver == 'lsqr':
+        x_numpy = ridge_complex(A_numpy, y_numpy, alpha, solver='lsqr', initial_x = x_old_numpy)
+    else:
+        raise RuntimeError("Unsupported solver: " + solver)
+
     x = tf.constant(x_numpy, dtype=cmplx_dtype)
 
     loss_diff =  np.linalg.norm(y_numpy - np.dot(A_numpy, x_numpy))**2 \
@@ -245,23 +203,30 @@ def ridge_complex_tf(N1, N2, A, y, alpha, x_old):
 
     return x, loss_diff/N1
 
+def __normalize_tensor(tensor):
+    norm = tf.real(tf.norm(tensor))
+    return tensor/tf.cast(norm, dtype=cmplx_dtype), norm
 
-def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0):
+def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0):
     def update_core_tensor():
         """
         Build a least squares model for optimizing core tensor
         """
         # TODO: remove np.full()
-        A_lsm = tf.constant(np.full((model.Nw, model.Nr, model.D),1), dtype=cmplx_dtype)
+        A_lsm = tf.fill([model.Nw, model.Nr, model.D], tf.cast(1.0, dtype=cmplx_dtype))
         for i in range(model.freq_dim):
             UX = tf.einsum('nrl,dl->nrd', model.tensors_A[i], model.x_tensors[i+1])
             A_lsm = tf.multiply(A_lsm , UX)
 
         # Reshape A_lsm as (Nw, R, D) to (Nw, D, R)
         A_lsm = tf.transpose(A_lsm, [0, 2, 1])
+        A_lsm = tf.cast(model.coeff, dtype=cmplx_dtype) * A_lsm
         # This should be
-        new_core_tensor, diff = ridge_complex_tf(model.Nw, model.D * model.Nr, A_lsm, model.y, model.alpha, model.x_tensors[0])
+        new_core_tensor, diff = ridge_complex_tf(model.Nw, model.D * model.Nr, A_lsm, model.y, model.alpha, model.x_tensors[0], solver)
         new_core_tensor = tf.reshape(new_core_tensor, [model.D, model.Nr])
+        new_core_tensor, norm = __normalize_tensor(new_core_tensor)
+
+        model.coeff.assign(model.coeff * norm)
         tf.assign(model.x_tensors[0], new_core_tensor)
 
         return diff
@@ -279,9 +244,13 @@ def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0):
         # Core tensor
         UX_prod = tf.einsum('nrd,dr->nrd', UX_prod, model.x_tensors[0])
         A_lsm = tf.reduce_sum(tf.einsum('nrd,nrl->nrdl', UX_prod, model.tensors_A[pos-1]), axis=1)
+        A_lsm = tf.cast(model.coeff, dtype=cmplx_dtype) * A_lsm
         # At this point, A_lsm is shape of (Nw, D, Nl)
-        new_tensor, diff = ridge_complex_tf(model.Nw, model.D*model.linear_dim, A_lsm, model.y, model.alpha, model.x_tensors[pos])
-        tf.assign(model.x_tensors[pos], tf.reshape(new_tensor, [model.D, model.linear_dim]))
+        new_tensor, diff = ridge_complex_tf(model.Nw, model.D*model.linear_dim, A_lsm, model.y, model.alpha, model.x_tensors[pos], solver)
+        new_tensor = tf.reshape(new_tensor, [model.D, model.linear_dim])
+        new_tensor, norm = __normalize_tensor(new_tensor)
+        model.coeff.assign(model.coeff * norm)
+        tf.assign(model.x_tensors[pos], new_tensor)
 
         return diff
 
@@ -299,9 +268,9 @@ def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0):
 
         losss.append(loss)
 
-        print("epoch = ", epoch, " loss = ", losss[-1])
-        if verbose > 0 and epoch%10 == 0:
-            print("epoch = ", epoch, " loss = ", losss[-1])
+        print("epoch = ", epoch, " loss = ", losss[-1], " rmse = ", np.sqrt(model.mse()), model.coeff.numpy())
+        if verbose > 0 and epoch%20 == 0:
+            print("epoch = ", epoch, " loss = ", losss[-1], " rmse = ", np.sqrt(model.mse()))
 
         if len(losss) > 2:
             diff_losss.append(np.abs(losss[-2] - losss[-1]))
