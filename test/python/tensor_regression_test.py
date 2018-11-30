@@ -1,8 +1,5 @@
 from __future__ import print_function
 
-import tensorflow as tf
-import tensorflow.contrib.eager as tfe
-
 import unittest
 import numpy
 
@@ -12,9 +9,6 @@ from irbasis_util.two_point_basis import *
 from irbasis_util.internal import *
 from irbasis_util.regression import *
 from irbasis_util.tensor_regression import *
-
-real_dtype = tf.float64
-cmplx_dtype = tf.complex128
 
 class TestMethods(unittest.TestCase):
     def __init__(self, *args, **kwargs):
@@ -42,17 +36,19 @@ class TestMethods(unittest.TestCase):
 
         def create_tensor_3(N, M, L):
             rand = numpy.random.rand(N, M, L) + 1J * numpy.random.rand(N, M, L)
-            return tf.constant(rand, dtype=cmplx_dtype)
+            return rand
 
         tensors_A = [create_tensor_3(Nw, Nr, linear_dim) for i in range(freq_dim)]
-        y = tf.constant(numpy.random.randn(Nw) + 1J * numpy.random.randn(Nw), dtype=cmplx_dtype)
+        y = numpy.random.randn(Nw) + 1J * numpy.random.randn(Nw)
 
         for solver in ['svd', 'lsqr']:
             numpy.random.seed(100)
             model = OvercompleteGFModel(Nw, Nr, freq_dim, linear_dim, tensors_A, y, alpha, D)
             info = optimize_als(model, nite = 1000, verbose=0, solver=solver)
 
-            print("loss", info['losss'][-1])
+            #print("loss", info['losss'][-1])
+            for i, loss in enumerate(info['losss']):
+                print(i, loss)
             self.assertLess(numpy.abs(info['losss'][-1] - info['losss'][-2]), 1e-10)
 
 
