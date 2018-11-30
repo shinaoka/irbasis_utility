@@ -86,7 +86,10 @@ def ridge_lsqr(A, y, alpha, tol=1e-10, precond=None, x0=None, verbose=0):
     if x0 is None:
         x0_extend = None
     else:
-        x0_extend = x0/precond[:]
+        if precond is None:
+            x0_extend = x0
+        else:
+            x0_extend = x0/precond[:]
 
     y_extend = numpy.zeros((N1 + N2))
     y_extend[:N1] = y
@@ -133,7 +136,7 @@ def ridge_complex(A, y, alpha, solver='svd', x0 = None, precond = None, tol=1e-1
             precond_big[0, :] = precond
             precond_big[1, :] = precond
             precond_big = precond_big.reshape((2*N2,))
-        coef = ridge_lsqr(A_big.reshape((2*N1, 2*N2)), y_big.reshape((2*N1)), alpha, precond=precond_big, x0=x0_big, tol=tol, verbose=0)
+        coef = ridge_lsqr(A_big.reshape((2*N1, 2*N2)), y_big.reshape((2*N1)), alpha, precond=precond_big, x0=x0_big, tol=tol, verbose=verbose)
     else:
         raise RuntimeError("Uknown solver: " + solver)
 

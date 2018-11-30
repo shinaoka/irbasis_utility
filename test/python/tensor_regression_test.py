@@ -23,8 +23,7 @@ class TestMethods(unittest.TestCase):
 
 
 
-"""
-    def test_zals(self):
+    def test_als(self):
         numpy.random.seed(100)
 
         Nw = 100
@@ -34,12 +33,12 @@ class TestMethods(unittest.TestCase):
         D = 20
         alpha = 0.1
 
-        Nw = 10000
-        Nr = 12
-        linear_dim = 30
-        freq_dim = 2
-        D = 10
-        alpha = 0.1
+        #Nw = 10000
+        #Nr = 12
+        #linear_dim = 30
+        #freq_dim = 2
+        #D = 10
+        #alpha = 0.1
 
         def create_tensor_3(N, M, L):
             rand = numpy.random.rand(N, M, L) + 1J * numpy.random.rand(N, M, L)
@@ -51,10 +50,9 @@ class TestMethods(unittest.TestCase):
         for solver in ['svd', 'lsqr']:
             numpy.random.seed(100)
             model = OvercompleteGFModel(Nw, Nr, freq_dim, linear_dim, tensors_A, y, alpha, D)
-            info = optimize_als(model, nite = 10, verbose=0, solver=solver)
+            info = optimize_als(model, nite = 1000, verbose=0, solver=solver)
 
-            #self.assertLess(numpy.abs(info['losss'][-1] - info['losss'][-2]), 1e-10)
-"""
+            self.assertLess(numpy.abs(info['losss'][-1] - info['losss'][-2]), 1e-10)
 
 
 if __name__ == '__main__':

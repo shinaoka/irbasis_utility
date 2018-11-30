@@ -115,9 +115,9 @@ class OvercompleteGFModel(object):
 
     def full_tensor_x(self, x_tensors_plus_coeff=None):
         if x_tensors_plus_coeff == None:
-            return self.coeff * cp_to_full_tensor(self.x_tensors)
+            return tf.cast(self.coeff, dtype=cmplx_dtype) * cp_to_full_tensor(self.x_tensors)
         else:
-            return x_tensors_plus_coeff[-1] * cp_to_full_tensor(x_tensors_plus_coeff[:-1])
+            return tf.cast(x_tensors_plus_coeff[-1], dtype=cmplx_dtype) * cp_to_full_tensor(x_tensors_plus_coeff[:-1])
 
     def predict_y(self, x_tensors_plus_coeff=None):
         """
@@ -161,8 +161,9 @@ class OvercompleteGFModel(object):
         assert self.y.shape == y_pre.shape
 
         r = squared_L2_norm(self.y - y_pre)
+        tmp = coeff**(2./len(x_tensors))
         for t in x_tensors:
-            r += (coeff**2) * self.alpha * squared_L2_norm(t)
+            r += tmp * self.alpha * squared_L2_norm(t)
         return r/self.Nw
 
     def mse(self, x_tensors_plus_coeff=None):
@@ -181,7 +182,7 @@ class OvercompleteGFModel(object):
         return (squared_L2_norm(self.y - y_pre))/self.Nw
 
 
-def ridge_complex_tf(N1, N2, A, y, alpha, x_old, solver='svd'):
+def ridge_complex_tf(N1, N2, A, y, alpha, x_old, solver='svd', precond=None):
     # TODO: remove CPU code
     A_numpy = A.numpy().reshape((N1, N2))
     y_numpy = y.numpy().reshape((N1,))
@@ -190,7 +191,7 @@ def ridge_complex_tf(N1, N2, A, y, alpha, x_old, solver='svd'):
     if solver == 'svd':
         x_numpy = ridge_complex(A_numpy, y_numpy, alpha, solver='svd')
     elif solver == 'lsqr':
-        x_numpy = ridge_complex(A_numpy, y_numpy, alpha, solver='lsqr', initial_x = x_old_numpy)
+        x_numpy = ridge_complex(A_numpy, y_numpy, alpha, solver='lsqr', precond=precond)
     else:
         raise RuntimeError("Unsupported solver: " + solver)
 
@@ -201,13 +202,23 @@ def ridge_complex_tf(N1, N2, A, y, alpha, x_old, solver='svd'):
                  + alpha * np.linalg.norm(x_numpy)**2 \
                  - alpha * np.linalg.norm(x_old_numpy)**2
 
+    if loss_diff > 0:
+        print(np.linalg.norm(y_numpy - np.dot(A_numpy, x_numpy))**2)
+        print(np.linalg.norm(y_numpy - np.dot(A_numpy, x_old_numpy))**2)
+        print(alpha * np.linalg.norm(x_numpy)**2)
+        print(alpha * np.linalg.norm(x_old_numpy)**2)
+    assert loss_diff <= 0
+
     return x, loss_diff/N1
 
 def __normalize_tensor(tensor):
     norm = tf.real(tf.norm(tensor))
     return tensor/tf.cast(norm, dtype=cmplx_dtype), norm
 
-def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0):
+def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, precond=None):
+    Nr = model.Nr
+    D = model.D
+
     def update_core_tensor():
         """
         Build a least squares model for optimizing core tensor
@@ -262,15 +273,24 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0):
         # Optimize core tensor
         loss += update_core_tensor()
 
+        for x in model.x_tensors:
+            print("norm of x ", tf.norm(x))
+
+        assert not loss is None
+        assert loss >= 0
+
         # Optimize the other tensors
         for pos in range(1, model.freq_dim+1):
             loss += update_l_tensor(pos)
+
+            assert not loss is None
+            assert loss >= 0
 
         losss.append(loss)
 
         print("epoch = ", epoch, " loss = ", losss[-1], " rmse = ", np.sqrt(model.mse()), model.coeff.numpy())
         if verbose > 0 and epoch%20 == 0:
-            print("epoch = ", epoch, " loss = ", losss[-1], " rmse = ", np.sqrt(model.mse()))
+            print("epoch = ", epoch, " loss = ", losss[-1], " rmse = ", np.sqrt(model.mse()), model.coeff.numpy())
 
         if len(losss) > 2:
             diff_losss.append(np.abs(losss[-2] - losss[-1]))
