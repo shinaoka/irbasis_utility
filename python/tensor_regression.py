@@ -3,6 +3,7 @@ from __future__ import print_function
 from .regression import ridge_complex
 
 import numpy as np
+from scipy.linalg import LinAlgError
 import scipy
 from itertools import *
 import time
@@ -171,7 +172,13 @@ def ridge_complex_tf(N1, N2, A, y, alpha, x_old, solver='svd', precond=None, ver
 
     try:
         if solver == 'svd':
-            x_numpy = ridge_complex(A_numpy, y_numpy, alpha, solver='svd')
+            try:
+                x_numpy = ridge_complex(A_numpy, y_numpy, alpha, solver='svd')
+            except LinAlgError:
+                if verbose > 0:
+                    print("svd did not converge, falling back to lsqr...")
+                x_numpy = ridge_complex(A_numpy, y_numpy, alpha, solver='lsqr')
+
         elif solver == 'lsqr':
             x_numpy = ridge_complex(A_numpy, y_numpy, alpha, solver='lsqr', x0=x_old_numpy, precond=precond, verbose=verbose)
         else:
@@ -182,12 +189,11 @@ def ridge_complex_tf(N1, N2, A, y, alpha, x_old, solver='svd', precond=None, ver
         print("alpha: ", alpha)
         raise RuntimeError("Error in ridge_complex")
 
-    loss_diff =  np.linalg.norm(y_numpy - np.dot(A_numpy, x_numpy))**2 \
-                 - np.linalg.norm(y_numpy - np.dot(A_numpy, x_old_numpy))**2 \
-                 + alpha * np.linalg.norm(x_numpy)**2 \
-                 - alpha * np.linalg.norm(x_old_numpy)**2
+    new_loss =  np.linalg.norm(y_numpy - np.dot(A_numpy, x_numpy))**2 + alpha * np.linalg.norm(x_numpy)**2
+    old_loss = np.linalg.norm(y_numpy - np.dot(A_numpy, x_old_numpy))**2 + alpha * np.linalg.norm(x_old_numpy)**2
+    loss_diff = new_loss - old_loss
 
-    if loss_diff > 0:
+    if loss_diff > 0 and np.abs(loss_diff) > 1e-8 * np.abs(new_loss):
         U, S, V = scipy.linalg.svd(A_numpy)
         print("Warning loss_diff > 0!: loss_diff = ", loss_diff)
         print("    condA", S[0]/S[-1], S[0], S[-1])
@@ -195,7 +201,6 @@ def ridge_complex_tf(N1, N2, A, y, alpha, x_old, solver='svd', precond=None, ver
         print("    ", np.linalg.norm(y_numpy - np.dot(A_numpy, x_old_numpy))**2)
         print("    ", alpha * np.linalg.norm(x_numpy)**2)
         print("    ", alpha * np.linalg.norm(x_old_numpy)**2)
-    #assert loss_diff <= 0
 
     return x_numpy, loss_diff/N1
 
@@ -234,7 +239,7 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, precond=
         t2 = time.time()
         new_core_tensor, diff = ridge_complex_tf(Nw, D * Nr, A_lsm, y, alpha, x_tensors[0], solver)
         t3 = time.time()
-        if verbose > 2:
+        if verbose >= 2:
             print("core : time ", t2-t1, t3-t2)
         model.x_tensors[0] = np.reshape(new_core_tensor, [D, Nr])
 
@@ -255,12 +260,11 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, precond=
         t2 = time.time()
         new_tensor, diff = ridge_complex_tf(Nw, D*linear_dim, A_lsm, y, alpha, x_tensors[pos], solver)
         t3 = time.time()
-        if verbose > 2:
+        if verbose >= 2:
             print("rest : time ", t2-t1, t3-t2)
 
         model.x_tensors[pos] = np.reshape(new_tensor, [D, linear_dim])
 
-        #UXs[pos-1, :, :, :] = np.einsum('nrl,dl->nrd', tensors_A[pos-1], x_tensors[pos])
         UXs[pos-1, :, :, :] = np.tensordot(tensors_A[pos-1], x_tensors[pos].transpose((1,0)), axes=(2,0))
 
         return diff
@@ -282,14 +286,12 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, precond=
             return info
 
         assert not loss is None
-        #assert loss >= 0
 
         # Optimize the other tensors
         for pos in range(1, model.freq_dim+1):
             loss += update_l_tensor(pos)
 
             assert not loss is None
-            #assert loss >= 0
 
             if np.linalg.norm(model.x_tensors[pos]) < min_norm:
                 info = {}
