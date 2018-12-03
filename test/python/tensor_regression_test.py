@@ -49,7 +49,7 @@ class TestMethods(unittest.TestCase):
             #print("loss", info['losss'][-1])
             #for i, loss in enumerate(info['losss']):
                 #print(i, loss)
-            self.assertLess(numpy.abs(info['losss'][-1] - info['losss'][-2]), 1e-10)
+            self.assertLess(numpy.abs(info['losss'][-1] - info['losss'][-2]), 1e-9)
 
 
 if __name__ == '__main__':

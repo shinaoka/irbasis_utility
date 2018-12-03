@@ -185,4 +185,31 @@ In the Matsubara domain, this reads
 \end{table}
 \fi
 
+\section{Tensor regression}
+We decomposed the particle-hole view of the two-particle Green's function as
+\begin{align}
+G(r, l_1, l_2) &= \sum_{d=1}^D C(d, r) X_1(d,l_1) X_2(d,l_2),
+\end{align}
+where $r$ is the index of 12=($3\times 2\times 2$) orthogonal systems.
+This is referred to as a CP decomposition [canonical (CANDECOMP) / parallel pactors (PARAFAC)].
+We will find useful information in ``Tensor Learning for Regression" written by Weiwei Guo, Irene Kotsia.
+
+The cost function reads
+\begin{align}
+&& |G(\boldsymbol{n}) - U(\boldsymbol{n}, r, l_1) U(\boldsymbol{n}, r, l_2) G(r, l_1, l_2)|^2_2 \nonumber \\
+&& + \alpha \left\{ |C|^2_2 + |X_1|^2_2 + |X_2|^2_2 \right\},
+\end{align}
+where $\boldsymbol{n} \equiv (n, n^\prime, m)$ runs over sampling points in the Matsubara frequency domain.
+This cost function can be minimized using alternative projections since the penalty term is separable with respect to $C$, $X_1$ or $X_2$.
+That is, we minimize the cost function with respect to either $C$, $X_1$ or $X_2$ at one time.
+This ends up with performing many smaller Ridge regressions.
+
+\begin{figure}
+	\centering\includegraphics[width=.4\textwidth,clip]{tensor_regression.pdf}
+	\caption{
+		Graphical representation of CP decomposition
+	}
+	\label{fig:CP}
+\end{figure}
+
 \end{document}

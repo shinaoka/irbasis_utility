@@ -5,6 +5,7 @@ from .regression import ridge_complex
 import numpy as np
 import scipy
 from itertools import *
+import time
 
 def full_A_tensor(tensors_A):
     """
@@ -163,8 +164,7 @@ class OvercompleteGFModel(object):
         return (squared_L2_norm(self.y - y_pre))/self.Nw
 
 
-def ridge_complex_tf(N1, N2, A, y, alpha, x_old, solver='svd', precond=None):
-    # TODO: remove CPU code
+def ridge_complex_tf(N1, N2, A, y, alpha, x_old, solver='svd', precond=None, verbose=0):
     A_numpy = A.reshape((N1, N2))
     y_numpy = y.reshape((N1,))
     x_old_numpy = x_old.reshape((N2,))
@@ -173,7 +173,7 @@ def ridge_complex_tf(N1, N2, A, y, alpha, x_old, solver='svd', precond=None):
         if solver == 'svd':
             x_numpy = ridge_complex(A_numpy, y_numpy, alpha, solver='svd')
         elif solver == 'lsqr':
-            x_numpy = ridge_complex(A_numpy, y_numpy, alpha, solver='lsqr', x0=x_old_numpy, precond=precond, verbose=1)
+            x_numpy = ridge_complex(A_numpy, y_numpy, alpha, solver='lsqr', x0=x_old_numpy, precond=precond, verbose=verbose)
         else:
             raise RuntimeError("Unsupported solver: " + solver)
     except:
@@ -203,7 +203,7 @@ def __normalize_tensor(tensor):
     norm = np.linalg.norm(tensor)
     return tensor/norm, norm
 
-def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, precond=None):
+def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, precond=None, min_norm=1e-8):
     Nr = model.Nr
     D = model.D
     Nw = model.Nw
@@ -215,25 +215,27 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, precond=
     y = model.y
     alpha = model.alpha
 
+    # UXs is defined as follows.
+    #for i in range(freq_dim):
+    #    UXs[i, :, :, :] = np.einsum('nrl,dl->nrd', tensors_A[i], x_tensors[i+1])
+    UXs = np.empty((freq_dim, Nw, Nr, D), dtype=complex)
+    for i in range(freq_dim):
+        UXs[i, :, :, :] = np.einsum('nrl,dl->nrd', tensors_A[i], x_tensors[i+1])
+
     def update_core_tensor():
         """
         Build a least squares model for optimizing core tensor
         """
-        #import time
-        #t1 = time.time()
-        UXs = np.empty((freq_dim, Nw, Nr, D), dtype=complex)
-        for i in range(freq_dim):
-            UXs[i, :, :, :] = np.einsum('nrl,dl->nrd', tensors_A[i], x_tensors[i+1])
-        A_lsm = np.prod(UXs, axis=0)
+        t1 = time.time()
+        A_lsm = coeff * np.prod(UXs, axis=0)
 
         # Reshape A_lsm as (Nw, R, D) to (Nw, D, R)
         A_lsm = np.transpose(A_lsm, [0, 2, 1])
-        A_lsm *= coeff
-        # This should be
-        #t2 = time.time()
+        t2 = time.time()
         new_core_tensor, diff = ridge_complex_tf(Nw, D * Nr, A_lsm, y, alpha, x_tensors[0], solver)
-        #t3 = time.time()
-        #print("time,", t2-t1, t3-t2)
+        t3 = time.time()
+        if verbose > 2:
+            print("core : time ", t2-t1, t3-t2)
         model.x_tensors[0] = np.reshape(new_core_tensor, [D, Nr])
 
         return diff
@@ -241,20 +243,25 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, precond=
     def update_l_tensor(pos):
         assert pos > 0
 
-        # TODO: remove np.full()
-        UX_prod = np.full((Nw, Nr, D),1, dtype=complex)
-        for i in range(freq_dim):
-            if i + 1 == pos:
-                continue
-            UX = np.einsum('nrl,dl->nrd', tensors_A[i], x_tensors[i+1])
-            UX_prod *= UX
-        # Core tensor
+        t1 = time.time()
+        mask = np.arange(freq_dim) != pos-1
+        UX_prod = np.prod(UXs[mask, :, :, :], axis=0)
         UX_prod = np.einsum('nrd,dr->nrd', UX_prod, x_tensors[0])
+
+        # This is slow part.
         A_lsm = coeff * np.sum(np.einsum('nrd,nrl->nrdl', UX_prod, tensors_A[pos-1]), axis=1)
+
         # At this point, A_lsm is shape of (Nw, D, Nl)
+        t2 = time.time()
         new_tensor, diff = ridge_complex_tf(Nw, D*linear_dim, A_lsm, y, alpha, x_tensors[pos], solver)
+        t3 = time.time()
+        if verbose > 2:
+            print("rest : time ", t2-t1, t3-t2)
 
         model.x_tensors[pos] = np.reshape(new_tensor, [D, linear_dim])
+
+        #UXs[pos-1, :, :, :] = np.einsum('nrl,dl->nrd', tensors_A[pos-1], x_tensors[pos])
+        UXs[pos-1, :, :, :] = np.tensordot(tensors_A[pos-1], x_tensors[pos].transpose((1,0)), axes=(2,0))
 
         return diff
 
@@ -266,8 +273,13 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, precond=
         # Optimize core tensor
         loss += update_core_tensor()
 
-        #for x in model.x_tensors:
-            #print("norm of x ", tf.norm(x))
+        if np.linalg.norm(model.x_tensors[0]) < min_norm:
+            if verbose > 2:
+                for i, x in enumerate(model.x_tensors):
+                    print("norm of x ", i, np.linalg.norm(x))
+            info = {}
+            info['losss'] = losss
+            return info
 
         assert not loss is None
         #assert loss >= 0
@@ -278,6 +290,11 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, precond=
 
             assert not loss is None
             #assert loss >= 0
+
+            if np.linalg.norm(model.x_tensors[pos]) < min_norm:
+                info = {}
+                info['losss'] = losss
+                return info
 
         losss.append(loss)
 
