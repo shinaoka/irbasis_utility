@@ -206,25 +206,35 @@ def __normalize_tensor(tensor):
 def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, precond=None):
     Nr = model.Nr
     D = model.D
+    Nw = model.Nw
+    freq_dim = model.freq_dim
+    linear_dim = model.linear_dim
+    tensors_A = model.tensors_A
+    x_tensors = model.x_tensors
+    coeff = model.coeff
+    y = model.y
+    alpha = model.alpha
 
     def update_core_tensor():
         """
         Build a least squares model for optimizing core tensor
         """
-        # TODO: remove np.full()
-        A_lsm = np.full( (model.Nw, model.Nr, model.D), 1.0, dtype=complex)
-        for i in range(model.freq_dim):
-            UX = np.einsum('nrl,dl->nrd', model.tensors_A[i], model.x_tensors[i+1])
-            A_lsm *= UX
+        #import time
+        #t1 = time.time()
+        UXs = np.empty((freq_dim, Nw, Nr, D), dtype=complex)
+        for i in range(freq_dim):
+            UXs[i, :, :, :] = np.einsum('nrl,dl->nrd', tensors_A[i], x_tensors[i+1])
+        A_lsm = np.prod(UXs, axis=0)
 
         # Reshape A_lsm as (Nw, R, D) to (Nw, D, R)
         A_lsm = np.transpose(A_lsm, [0, 2, 1])
-        A_lsm *= model.coeff
+        A_lsm *= coeff
         # This should be
-        new_core_tensor, diff = ridge_complex_tf(model.Nw, model.D * model.Nr, A_lsm, model.y, model.alpha, model.x_tensors[0], solver)
-        new_core_tensor = np.reshape(new_core_tensor, [model.D, model.Nr])
-
-        model.x_tensors[0] = new_core_tensor
+        #t2 = time.time()
+        new_core_tensor, diff = ridge_complex_tf(Nw, D * Nr, A_lsm, y, alpha, x_tensors[0], solver)
+        #t3 = time.time()
+        #print("time,", t2-t1, t3-t2)
+        model.x_tensors[0] = np.reshape(new_core_tensor, [D, Nr])
 
         return diff
 
@@ -232,21 +242,19 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, precond=
         assert pos > 0
 
         # TODO: remove np.full()
-        UX_prod = np.full((model.Nw, model.Nr, model.D),1, dtype=complex)
-        for i in range(model.freq_dim):
+        UX_prod = np.full((Nw, Nr, D),1, dtype=complex)
+        for i in range(freq_dim):
             if i + 1 == pos:
                 continue
-            UX = np.einsum('nrl,dl->nrd', model.tensors_A[i], model.x_tensors[i+1])
+            UX = np.einsum('nrl,dl->nrd', tensors_A[i], x_tensors[i+1])
             UX_prod *= UX
         # Core tensor
-        UX_prod = np.einsum('nrd,dr->nrd', UX_prod, model.x_tensors[0])
-        A_lsm = np.sum(np.einsum('nrd,nrl->nrdl', UX_prod, model.tensors_A[pos-1]), axis=1)
-        A_lsm = model.coeff * A_lsm
+        UX_prod = np.einsum('nrd,dr->nrd', UX_prod, x_tensors[0])
+        A_lsm = coeff * np.sum(np.einsum('nrd,nrl->nrdl', UX_prod, tensors_A[pos-1]), axis=1)
         # At this point, A_lsm is shape of (Nw, D, Nl)
-        new_tensor, diff = ridge_complex_tf(model.Nw, model.D*model.linear_dim, A_lsm, model.y, model.alpha, model.x_tensors[pos], solver)
-        new_tensor = np.reshape(new_tensor, [model.D, model.linear_dim])
+        new_tensor, diff = ridge_complex_tf(Nw, D*linear_dim, A_lsm, y, alpha, x_tensors[pos], solver)
 
-        model.x_tensors[pos] = new_tensor
+        model.x_tensors[pos] = np.reshape(new_tensor, [D, linear_dim])
 
         return diff
 
