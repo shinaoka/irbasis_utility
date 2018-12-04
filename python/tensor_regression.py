@@ -149,6 +149,23 @@ class OvercompleteGFModel(object):
             r += tmp * self.alpha * squared_L2_norm(t)
         return r/self.Nw
 
+    def update_alpha(self, target_ratio=1e-8):
+        """
+        Update alpha so that L2 regularization term/residual term ~ target_ratio
+        """
+        x_tensors = self.x_tensors
+        coeff = self.coeff
+        assert coeff == 1.0
+
+        y_pre = self.predict_y(x_tensors + [coeff])
+
+        res = squared_L2_norm(self.y - y_pre)
+        reg = np.sum([squared_L2_norm(t) for t in x_tensors])
+
+        self.alpha = target_ratio * res/reg
+
+        return self.alpha
+
     def mse(self, x_tensors_plus_coeff=None):
         """
         Compute mean squared error
@@ -208,7 +225,7 @@ def __normalize_tensor(tensor):
     norm = np.linalg.norm(tensor)
     return tensor/norm, norm
 
-def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, precond=None, min_norm=1e-8):
+def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, precond=None, min_norm=1e-8, optimize_alpha=-1):
     Nr = model.Nr
     D = model.D
     Nw = model.Nw
@@ -218,7 +235,6 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, precond=
     x_tensors = model.x_tensors
     coeff = model.coeff
     y = model.y
-    alpha = model.alpha
 
     # UXs is defined as follows.
     #for i in range(freq_dim):
@@ -237,7 +253,7 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, precond=
         # Reshape A_lsm as (Nw, R, D) to (Nw, D, R)
         A_lsm = np.transpose(A_lsm, [0, 2, 1])
         t2 = time.time()
-        new_core_tensor, diff = ridge_complex_tf(Nw, D * Nr, A_lsm, y, alpha, x_tensors[0], solver)
+        new_core_tensor, diff = ridge_complex_tf(Nw, D * Nr, A_lsm, y, model.alpha, x_tensors[0], solver)
         t3 = time.time()
         if verbose >= 2:
             print("core : time ", t2-t1, t3-t2)
@@ -258,7 +274,7 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, precond=
 
         # At this point, A_lsm is shape of (Nw, D, Nl)
         t2 = time.time()
-        new_tensor, diff = ridge_complex_tf(Nw, D*linear_dim, A_lsm, y, alpha, x_tensors[pos], solver)
+        new_tensor, diff = ridge_complex_tf(Nw, D*linear_dim, A_lsm, y, model.alpha, x_tensors[pos], solver)
         t3 = time.time()
         if verbose >= 2:
             print("rest : time ", t2-t1, t3-t2)
@@ -304,7 +320,7 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, precond=
             loss = model.loss()
             rmses.append(np.sqrt(model.mse()))
             if verbose > 0:
-                print("epoch = ", epoch, " loss = ", losss[-1], " rmse = ", rmses[-1], " coeff = ", model.coeff)
+                print("epoch = ", epoch, " loss = ", losss[-1], " rmse = ", rmses[-1], " alpha = ", model.alpha)
                 for i, x in enumerate(model.x_tensors):
                     print("norm of x ", i, np.linalg.norm(x))
 
@@ -312,6 +328,9 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, precond=
             diff_rmse = np.abs(rmses[-2] - rmses[-1])
             if diff_rmse < tol_rmse:
                 break
+
+        if optimize_alpha > 0:
+            model.update_alpha(optimize_alpha)
 
     info = {}
     info['losss'] = losss
