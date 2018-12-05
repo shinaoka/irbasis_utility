@@ -156,10 +156,50 @@ class FourPointPHView(object):
                 sp_o.append((o2, o1))
 
         # Remove duplicate elements
-        sp_o = list(set(sp_o))
+        sp_o = sorted(list(set(sp_o)))
 
         # From "o" convention to normal Matsubara convention
         return [(o_to_matsubara_idx_f(p[0]), o_to_matsubara_idx_f(p[1])) for p in sp_o]
+
+    def to_two_fermion_convention(self, n, r, s1, s2):
+        """
+        Return a frequency point in the two-fermion convention corresponding to the given frequency point in the r-th representation
+
+        Parameters
+        ----------
+        n : tuple of two integers
+            A frequency point in the r-th representation
+
+        r : int
+            r = 0, 1, 2
+
+        s1, s2 : int
+            shift (0 or 1)
+
+        Returns
+        -------
+        n_r0 : A tuple of two integers
+            A tuple of two frequencies in the two-fermion convention
+        """
+
+        assert s1 == 0 or s1 == 1
+        assert s2 == 0 or s2 == 1
+        assert r == 0 or r == 1 or r == 2
+
+        if r == 0:
+            return (n[0] - s1 * self._m, n[1] - s2 * self._m)
+        elif r == 1:
+            o_r1 = (2 * n[0], 2 * n[1] + 1)
+            o_tf_1 = o_r1[1] - s2 * self._o
+            o_tf_0 = o_r1[0] - s1 * self._o + _sign(s1) * o_tf_1
+            return (o_to_matsubara_idx_f(o_tf_0), o_to_matsubara_idx_f(o_tf_1))
+        elif r == 2:
+            o_r2 = (2 * n[0], 2 * n[1] + 1)
+            o_tf_0 = o_r2[1] - s2 * self._o
+            o_tf_1 = o_r2[0] - s1 * self._o + _sign(s1) * o_tf_0
+            return (o_to_matsubara_idx_f(o_tf_0), o_to_matsubara_idx_f(o_tf_1))
+        else:
+            raise RuntimeError("r must be either 0, 1 or 2.")
 
     def _get_Usol(self, s, o):
         if o%2 == 0:

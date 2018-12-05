@@ -169,6 +169,37 @@ class TestMethods(unittest.TestCase):
         # absolute error
         self.assertLessEqual(numpy.amax(numpy.abs(Giwn_check - Giwn_check_ref)), 1e-3)
 
-        
+    def test_sampling_points_matsubara_2(self):
+        """
+        Check if sampling points generated for each representation are included in the global sampling points.
+        """
+        boson_freq = 10
+        Lambda = 10.0
+        beta = 0.2
+        alpha = 1e-15
+        augmented = True
+        wmax = Lambda / beta
+        phb = FourPointPHView(boson_freq, Lambda, beta, 1e-5, augmented)
+        Nl = phb.Nl
+        whichl = Nl - 1
+        sp = set(phb.sampling_points_matsubara(whichl))
+        sp_f = sampling_points_matsubara(phb.basis_beta_f, whichl)
+        sp_b = sampling_points_matsubara(phb.basis_beta_b, whichl)
+        sp_recomputed = set()
+        for p in sp:
+            for r, s1, s2 in product(range(3), range(2), range(2)):
+                if r == 0:
+                    # fermion, fermion
+                    for p1, p2 in product(sp_f, sp_f):
+                        p_twof = phb.to_two_fermion_convention((p1, p2), r, s1, s2)
+                        sp_recomputed.add(p_twof)
+                elif r == 1 or r == 2:
+                    # boson, fermion
+                    for p1, p2 in product(sp_b, sp_f):
+                        p_twof = phb.to_two_fermion_convention((p1, p2), r, s1, s2)
+                        sp_recomputed.add(p_twof)
+
+        self.assertEqual(sp, sp_recomputed)
+
 if __name__ == '__main__':
     unittest.main()
