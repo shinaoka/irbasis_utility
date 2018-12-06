@@ -5,6 +5,7 @@ from .regression import ridge_complex
 import numpy
 from scipy.linalg import LinAlgError
 import scipy
+
 from itertools import *
 import time
 
@@ -55,7 +56,6 @@ def cp_to_full_tensor(x_tensors):
         tildeT_reshaped = numpy.reshape(tildeT, (D,-1))
         tildeT = numpy.einsum('dI,di->dIi', tildeT_reshaped, x_tensors[i])
     full_tensor = numpy.sum(numpy.reshape(tildeT, (D,) + tuple(dims)), axis=0)
-    #assert full_tensor.shape == numpy.TensorShape(dims)
     return full_tensor
 
 
@@ -71,6 +71,38 @@ class OvercompleteGFModel(object):
     x(d, r, l1, l2, ...) = \sum_d X_0(d,r) * X_1(d,l1) * X_2(d,l2) * ...
     """
     def __init__(self, Nw, Nr, freq_dim, linear_dim, tensors_A, y, alpha, D):
+        """
+
+        Parameters
+        ----------
+        Nw : int
+            Number of sampling points in Matsubara frequency domain
+
+        Nr : int
+            Number of representations (meshes).
+            For three-frequency objects, Nr = 16.
+            For particle-hole vies, Nr = 12.
+
+        freq_dim : int
+            Dimension of frequency axes.
+            For three-frequency objects, freq_dim = 3.
+            For particle-hole vies, freq_dim = 2.
+
+        linear_dim : int
+            The linear dimension of IR
+
+        tensors_A : list of ndarray objects
+            Tensor-decomposed form of projector from IR to Matsubara frequency domain
+
+        y : complex 1D array
+            Data to be fitted
+
+        alpha : float
+            Initial value of regularization parameter
+
+        D : int
+            Rank of approximation (>=1)
+        """
         self.right_dims = (Nr,) + (linear_dim,) * freq_dim
         self.right_dim = freq_dim + 1
     
@@ -182,7 +214,7 @@ class OvercompleteGFModel(object):
         return (squared_L2_norm(self.y - y_pre))/self.Nw
 
 
-def ridge_complex_tf(N1, N2, A, y, alpha, x_old, solver='svd', precond=None, verbose=0):
+def __ridge_complex(N1, N2, A, y, alpha, x_old, solver='svd', precond=None, verbose=0):
     A_numpy = A.reshape((N1, N2))
     y_numpy = y.reshape((N1,))
     x_old_numpy = x_old.reshape((N2,))
@@ -210,7 +242,7 @@ def ridge_complex_tf(N1, N2, A, y, alpha, x_old, solver='svd', precond=None, ver
     old_loss = numpy.linalg.norm(y_numpy - numpy.dot(A_numpy, x_old_numpy))**2 + alpha * numpy.linalg.norm(x_old_numpy)**2
     loss_diff = new_loss - old_loss
 
-    if loss_diff > 0 and numpy.abs(loss_diff) > 1e-8 * numpy.abs(new_loss):
+    if verbose > 0 and loss_diff > 0 and numpy.abs(loss_diff) > 1e-8 * numpy.abs(new_loss):
         U, S, V = scipy.linalg.svd(A_numpy)
         print("Warning loss_diff > 0!: loss_diff = ", loss_diff)
         print("    condA", S[0]/S[-1], S[0], S[-1])
@@ -225,7 +257,40 @@ def __normalize_tensor(tensor):
     norm = numpy.linalg.norm(tensor)
     return tensor/norm, norm
 
-def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, precond=None, min_norm=1e-8, optimize_alpha=-1):
+def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm=1e-8, optimize_alpha=-1):
+    """
+    Alternating least squares
+
+    Parameters
+    ----------
+    model:  object of OvercompleteGFModel
+        Model to be optimized
+
+    nite: int
+        Number of max iterations.
+
+    tol_rmse: float
+        Stopping condition of optimization. rmse denotes "root mean squared error".
+
+    solver: string ('svd' or 'lsqr')
+        Workhorse for solving a reduced least squares problem.
+        Recommended to use 'svd'.
+        If 'svd' fails to converge, it falls back to 'lsqr'.
+
+    verbose: int
+        0, 1, 2
+
+    min_norm: float
+        The result is regarded as 0 if the norm drops below min_norm during optimization.
+
+    optimize_alpha: flaot
+        If a positive value is given, the value of the regularization parameter alpha is automatically determined.
+        (regularization term)/(squared norm of the residual) ~ optimize_alpha.
+
+    Returns
+    -------
+
+    """
     Nr = model.Nr
     D = model.D
     Nw = model.Nw
@@ -250,10 +315,10 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, precond=
         t1 = time.time()
         A_lsm = coeff * numpy.prod(UXs, axis=0)
 
-        # Reshape A_lsm as (Nw, R, D) to (Nw, D, R)
+        # Transpose A_lsm from (Nw, R, D) to (Nw, D, R)
         A_lsm = numpy.transpose(A_lsm, [0, 2, 1])
         t2 = time.time()
-        new_core_tensor, diff = ridge_complex_tf(Nw, D * Nr, A_lsm, y, model.alpha, x_tensors[0], solver)
+        new_core_tensor, diff = __ridge_complex(Nw, D * Nr, A_lsm, y, model.alpha, x_tensors[0], solver)
         t3 = time.time()
         if verbose >= 2:
             print("core : time ", t2-t1, t3-t2)
@@ -274,7 +339,7 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, precond=
 
         # At this point, A_lsm is shape of (Nw, D, Nl)
         t2 = time.time()
-        new_tensor, diff = ridge_complex_tf(Nw, D*linear_dim, A_lsm, y, model.alpha, x_tensors[pos], solver)
+        new_tensor, diff = __ridge_complex(Nw, D*linear_dim, A_lsm, y, model.alpha, x_tensors[pos], solver)
         t3 = time.time()
         if verbose >= 2:
             print("rest : time ", t2-t1, t3-t2)
