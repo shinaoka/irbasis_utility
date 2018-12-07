@@ -133,7 +133,7 @@ class FourPoint(object):
 
         conv = lambda x: tuple(map(o_to_matsubara_idx_f, x))
 
-        return list(map(conv, list(set(sp_o))))
+        return sorted(list(map(conv, list(set(sp_o)))))
 
     def _get_Unl_f(self, n):
         return self._Bf.compute_Unl([n])[:,0:self._Nl].reshape((self._Nl))
