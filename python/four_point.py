@@ -47,16 +47,23 @@ class FourPoint(object):
     def basis_beta_b(self):
         return self._Bb
 
-    def normalized_S(self):
+    def normalized_S(self, decomposed_form = False):
         Nl = self._Nl
-        svec = numpy.zeros((16, Nl, Nl, Nl))
         sf = numpy.array([self._Bf.Sl(l) / self._Bf.Sl(0) for l in range(Nl)])
         sb = numpy.array([self._Bb.Sl(l) / self._Bb.Sl(0) for l in range(Nl)])
-        svec[0:4, :, :, :] = sf[:, None, None] * sf[None, :, None] * sf[None, None, :]
-        svec[4:, :, :, :] = sf[:, None, None] * sb[None, :, None] * sf[None, None, :]
-        return svec
+        svec1 = numpy.zeros((16, Nl))
+        svec2 = numpy.zeros((16, Nl))
+        svec3 = numpy.zeros((16, Nl))
 
-    def projector_to_matsubara_vec(self, n1_n2_n3_n4_vec):
+        svec1[0:4, :], svec2[0:4, :], svec3[0:4, :] = sf[None, :], sf[None, :], sf[None, :]
+        svec1[4:, :], svec2[4:, :], svec3[4:, :] = sf[None, :], sb[None, :], sf[None, :]
+
+        if decomposed_form:
+            return svec1, svec2, svec3
+        else:
+            return numpy.einsum('ri,rj,rk->rijk', svec1, svec2, svec3)
+
+    def projector_to_matsubara_vec(self, n1_n2_n3_n4_vec, decomposed_form = False):
         """
         Return a projector from IR to Matsubara frequencies
         """
@@ -71,12 +78,22 @@ class FourPoint(object):
         self._Bf._precompute_Unl(n_f)
         self._Bb._precompute_Unl(n_b)
 
-        r = []
-        for n1, n2, n3, n4 in n1_n2_n3_n4_vec:
-            r.append(self.projector_to_matsubara(n1, n2, n3, n4))
-        return r
+        if decomposed_form:
+            nw = len(n1_n2_n3_n4_vec)
+            r = [numpy.zeros((nw, 16, self._Nl), dtype=complex) for i in range(3)]
+            for n1, n2, n3, n4 in n1_n2_n3_n4_vec:
+                M1, M2, M3 = self.projector_to_matsubara(n1, n2, n3, n4, True)
+                r[0][i, :, :, :, :] = M1
+                r[1][i, :, :, :, :] = M2
+                r[2][i, :, :, :, :] = M3
+            return r
+        else:
+            r = []
+            for n1, n2, n3, n4 in n1_n2_n3_n4_vec:
+                r.append(self.projector_to_matsubara(n1, n2, n3, n4))
+            return r
 
-    def projector_to_matsubara(self, n1, n2, n3, n4):
+    def projector_to_matsubara(self, n1, n2, n3, n4, decomposed_form = False):
         """
         Return a projector from IR to a Matsubara frequency
         """
@@ -85,20 +102,27 @@ class FourPoint(object):
 
         nvec = numpy.array([n1, n2, n3, n4])
 
-        M = numpy.zeros((16, self._Nl, self._Nl, self._Nl), dtype=complex)
+        M1 = numpy.zeros((16, self._Nl), dtype=complex)
+        M2 = numpy.zeros((16, self._Nl), dtype=complex)
+        M3 = numpy.zeros((16, self._Nl), dtype=complex)
         # FFF representations
         for r in range(4):
             n1_p, n2_p, n3_p = nvec[idx_n1n2n3_FFF[r]]
-            tensor_left = numpy.einsum('i,j->ij', self._get_Unl_f(n1_p), self._get_Unl_f(n2_p))
-            M[r, :, :, :] = numpy.einsum('ij,k->ijk', tensor_left, self._get_Unl_f(n3_p))
+            M1[r, :] = self._get_Unl_f(n1_p)
+            M2[r, :] = self._get_Unl_f(n2_p)
+            M3[r, :] = self._get_Unl_f(n3_p)
 
         # FBF representations
         for r in range(12):
             n1_p, n2_p, n4_p = nvec[idx_n1n2n4_FBF[r]]
-            tensor_FB = numpy.einsum('i,j->ij', self._get_Unl_f(n1_p), self._get_Unl_b(n1_p + n2_p + 1))
-            M[r + 4, :, :, :] = numpy.einsum('ij,k->ijk', tensor_FB, self._get_Unl_f(-n4_p - 1))
+            M1[r + 4, :] = self._get_Unl_f(n1_p)
+            M2[r + 4, :] = self._get_Unl_b(n1_p + n2_p + 1)
+            M3[r + 4, :] = self._get_Unl_f(-n4_p - 1)
 
-        return M
+        if decomposed_form:
+            return M1, M2, M3
+        else:
+            return numpy.einsum('ri,rj,rk->rijk', M1, M2, M3)
 
     def sampling_points_matsubara(self, whichl):
         """
