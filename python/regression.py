@@ -3,8 +3,9 @@ from __future__ import print_function
 import numpy
 import scipy
 import scipy.linalg
+from sklearn.linear_model import Ridge
 
-class Ridge(object):
+class RidgeLocal(object):
     """
     Implementation Ridge regression using SVD (only float y, A, y are supported)
 
@@ -139,7 +140,7 @@ class RidgeComplex(object):
         self._Ns = len(self._s)
         self._N1, self._N2 = self._U.shape[1], self._Vt.shape[-1]
 
-        self._ridge_float = Ridge(
+        self._ridge_float = RidgeLocal(
             (self._U.reshape((2 * self._N1, self._Ns)), self._s, self._Vt.reshape((self._Ns, 2 * self._N2)))
         )
 
@@ -245,20 +246,23 @@ def ridge_complex(A, y, alpha, solver='svd', blocks=[]):
     y_big = numpy.zeros((2,N1), dtype=float)
     y_big[0,:] = y.real
     y_big[1,:] = y.imag
-    
-    if solver == 'svd':
-        coef = ridge_svd(A_big.reshape((2*N1,2*N2)), y_big.reshape((2*N1)), alpha)
-    elif solver == 'svd_cd':
-        print("calling svd_cd")
-        coef = ridge_coordinate_descent(A_big.reshape((2*N1,2*N2)), y_big.reshape((2*N1)), alpha, blocks_big)
-    elif solver == 'sparse_cg':
-        #clf = Ridge(alpha=alpha, solver='sparse_cg', tol=1e-8, max_iter=1000000)
-        clf = Ridge(alpha=alpha, solver='svd')
-        clf.fit(A_big.reshape((2*N1,2*N2)), y_big.reshape((2*N1)))
-        coef = clf.coef_
-        print("nitr ", clf.n_iter_)
-    else:
-        raise RuntimeError("Uknown solver: " + solver)
+
+    test_ridge = Ridge(alpha=1.0, solver='lsqr')
+    test_sol = test_ridge.fit(A_big.reshape((2*N1,2*N2)), y_big.reshape((2*N1)))
+    coef = test_sol.coef_
+
+    #if solver == 'svd':
+    #    coef = ridge_svd(A_big.reshape((2*N1,2*N2)), y_big.reshape((2*N1)), alpha)
+    #elif solver == 'svd_cd':
+    #    print("calling svd_cd")
+    #    coef = ridge_coordinate_descent(A_big.reshape((2*N1,2*N2)), y_big.reshape((2*N1)), alpha, blocks_big)
+    #elif solver == 'sparse_cg':
+    #    clf = Ridge(alpha=alpha, solver='svd')
+    #    clf.fit(A_big.reshape((2*N1,2*N2)), y_big.reshape((2*N1)))
+    #    coef = clf.coef_
+    #    print("nitr ", clf.n_iter_)
+    #else:
+    #    raise RuntimeError("Uknown solver: " + solver)
 
     coef = coef.reshape((2,N2))
     return coef[0,:] + 1J * coef[1,:]
