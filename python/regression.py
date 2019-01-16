@@ -230,7 +230,7 @@ def ridge_coordinate_descent(X, y, alpha, blocks = [], rtol = 1e-8, cutoff = 1e-
     return x
 """
 
-def ridge_complex(A, y, alpha, solver='svd', blocks=[]):
+def ridge_complex(A, y, alpha, solver='svd', max_iter=10, blocks=[]):
     (N1, N2) = A.shape
     A_big = numpy.zeros((2,N1,2,N2), dtype=float)
     A_big[0,:,0,:] =  A.real
@@ -247,7 +247,7 @@ def ridge_complex(A, y, alpha, solver='svd', blocks=[]):
     y_big[0,:] = y.real
     y_big[1,:] = y.imag
 
-    test_ridge = Ridge(alpha=1.0, solver='lsqr')
+    test_ridge = Ridge(alpha=1.0, solver='lsqr', max_iter=max_iter)
     test_sol = test_ridge.fit(A_big.reshape((2*N1,2*N2)), y_big.reshape((2*N1)))
     coef = test_sol.coef_
 
