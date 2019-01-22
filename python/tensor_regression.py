@@ -9,28 +9,6 @@ import scipy
 from itertools import compress
 import time
 
-def full_A_tensor(tensors_A):
-    """
-    Decomposition of A tensors
-    A(n, r, l1, l2, ...) = U_1(n, r, l1) * U_2(n, r, l2) * ...
-    
-    The full tensor can be constructed as follows:
-       U_1(n, r, l1)                    -> tildeA(n, r, l1)
-       tildeA(n, r, l1) * U_2(n, r, l2) -> tildeA(n, r, l1, l2)
-    """
-    Nw = tensors_A[0].shape[0]
-    Nr = tensors_A[0].shape[1]
-    dim = len(tensors_A)
-    
-    tildeA = tensors_A[0]
-    for i in range(1, dim):
-        tildeA_reshaped = numpy.reshape(tildeA, (Nw, Nr, -1))
-        tildeA = numpy.einsum('nrl,nrm->nrlm', tildeA_reshaped, tensors_A[i])
-    
-    full_tensor_dims = tuple([Nw, Nr] + [t.shape[-1] for t in tensors_A])
-    return numpy.reshape(tildeA, full_tensor_dims)
-
-
 def squared_L2_norm(x):
     """
     Squared L2 norm
@@ -108,9 +86,7 @@ class OvercompleteGFModel(object):
         D : int
             Rank of approximation (>=1)
         """
-        #self.right_dims = (Nr,) + (linear_dim,) * freq_dim
-        #self.right_dim = freq_dim + 1
-    
+
         self.y = numpy.array(y, dtype=complex)
         self.tensors_A = [numpy.array(t, dtype=complex) for t in tensors_A]
         self.alpha = alpha
@@ -275,23 +251,21 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm
     freq_dim = model.freq_dim
     linear_dim = model.linear_dim
     tensors_A = model.tensors_A
-    x_tensor_r = model.x_tensor_r
-    x_tensors_l = model.x_tensors_l
     y = model.y
 
-    def update_core_tensor():
+    def update_r_tensor():
         """
         Build a least squares model for optimizing core tensor
         """
         t1 = time.time()
         if freq_dim == 2:
-            A_lsm = numpy.einsum('wrl,wrm, dl,dm->wdr', *(tensors_A + x_tensors_l), optimize=True)
+            A_lsm = numpy.einsum('wrl,wrm, dl,dm->wdr', *(tensors_A + model.x_tensors_l), optimize=True)
         elif freq_dim == 3:
-            A_lsm = numpy.einsum('wrl,wrm,wrn, dl,dm,dn->wdr', *(tensors_A + x_tensors_l), optimize=True)
+            A_lsm = numpy.einsum('wrl,wrm,wrn, dl,dm,dn->wdr', *(tensors_A + model.x_tensors_l), optimize=True)
 
         # Transpose A_lsm from (Nw, R, D) to (Nw, D, R)
         t2 = time.time()
-        new_core_tensor, diff = __ridge_complex(Nw, D * Nr, A_lsm, y, model.alpha, x_tensor_r, solver)
+        new_core_tensor, diff = __ridge_complex(Nw, D * Nr, A_lsm, y, model.alpha, model.x_tensor_r, solver)
         t3 = time.time()
         if verbose >= 2:
             print("core : time ", t2-t1, t3-t2)
@@ -305,17 +279,18 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm
         t1 = time.time()
         mask = numpy.arange(freq_dim) != pos
         tensors_A_masked = list(compress(tensors_A, mask))
-        x_tensors_l_masked = list(compress(x_tensors_l, mask))
+        x_tensors_l_masked = list(compress(model.x_tensors_l, mask))
+        print(mask)
 
         if freq_dim == 2:
-            tmp = numpy.einsum('wrl, dr, dl->wrd', *(tensors_A_masked + [x_tensor_r] + x_tensors_l_masked), optimize=True)
+            tmp = numpy.einsum('wrl, dr, dl->wrd', *(tensors_A_masked + [model.x_tensor_r] + x_tensors_l_masked), optimize=True)
         elif freq_dim == 3:
-            tmp = numpy.einsum('wrl,wrm, dr, dl,dm->wrd', *(tensors_A_masked + [x_tensor_r] + x_tensors_l_masked), optimize=True)
+            tmp = numpy.einsum('wrl,wrm, dr, dl,dm->wrd', *(tensors_A_masked + [model.x_tensor_r] + x_tensors_l_masked), optimize=True)
         A_lsm = numpy.einsum('wrd,wrl->wdl', tmp, tensors_A[pos], optimize=True)
 
         # At this point, A_lsm is shape of (Nw, D, Nl)
         t2 = time.time()
-        new_tensor, diff = __ridge_complex(Nw, D*linear_dim, A_lsm, y, model.alpha, x_tensors_l[pos], solver)
+        new_tensor, diff = __ridge_complex(Nw, D*linear_dim, A_lsm, y, model.alpha, model.x_tensors_l[pos], solver)
         t3 = time.time()
         if verbose >= 2:
             print("rest : time ", t2-t1, t3-t2)
@@ -329,16 +304,8 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm
     loss = model.loss()
     rmses = []
     for epoch in epochs:
-        # Optimize core tensor
-        loss += update_core_tensor()
-
-        #if numpy.linalg.norm(model.x_tensor_r) < min_norm:
-            #if verbose > 2:
-                #for i, x in enumerate(model.x_tensors):
-                    #print("norm of x ", i, numpy.linalg.norm(x))
-            #info = {}
-            #info['losss'] = losss
-            #return info
+        # Optimize r tensor
+        loss += update_r_tensor()
 
         assert not loss is None
 
@@ -348,17 +315,11 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm
 
             assert not loss is None
 
-            #if numpy.linalg.norm(model.x_tensors[pos]) < min_norm:
-                #info = {}
-                #info['losss'] = losss
-                #return info
-
         losss.append(loss)
 
         if epoch%20 == 0:
             loss = model.loss()
             rmses.append(numpy.sqrt(model.mse()))
-            print("epoch = ", epoch, " loss = ", losss[-1], " rmse = ", rmses[-1], " alpha = ", model.alpha)
             if verbose > 0:
                 print("epoch = ", epoch, " loss = ", losss[-1], " rmse = ", rmses[-1], " alpha = ", model.alpha)
                 for i, x in enumerate(model.x_tensors):
