@@ -6,7 +6,7 @@ import numpy
 from scipy.linalg import LinAlgError
 import scipy
 
-from itertools import *
+from itertools import compress
 import time
 
 def full_A_tensor(tensors_A):
@@ -65,10 +65,15 @@ class OvercompleteGFModel(object):
   
     A(n, r, l1, l2, ...) = U_1(n, r, l1) * U_2(n, r, l2) * ...
   
-    A_dim: (Nw, Nr, l1, l2, ...)
-    freq_dim is the number of l1, l2, ....
-    
-    x(d, r, l1, l2, ...) = \sum_d X_0(d,r) * X_1(d,l1) * X_2(d,l2) * ...
+    The shape of A is (Nw, Nr, linear_dim, linear_dim, ...)
+    freq_di is the number of frequency indices.
+
+    x(d, r, l1, l2, ...) = \sum_d X_0(d,r) * X_1(d,l1) * X_2(d,l2) * ... * X_{freq_dim-1}(d, l_{freq_dim-1})
+        * X_{freq_dim}(d, i)
+        * X_{freq_dim}(d, j)
+        * X_{freq_dim}(d, k)
+        * X_{freq_dim}(d, l)
+
     """
     def __init__(self, Nw, Nr, freq_dim, linear_dim, tensors_A, y, alpha, D):
         """
@@ -103,8 +108,8 @@ class OvercompleteGFModel(object):
         D : int
             Rank of approximation (>=1)
         """
-        self.right_dims = (Nr,) + (linear_dim,) * freq_dim
-        self.right_dim = freq_dim + 1
+        #self.right_dims = (Nr,) + (linear_dim,) * freq_dim
+        #self.right_dim = freq_dim + 1
     
         self.y = numpy.array(y, dtype=complex)
         self.tensors_A = [numpy.array(t, dtype=complex) for t in tensors_A]
@@ -119,22 +124,13 @@ class OvercompleteGFModel(object):
             rand = numpy.random.rand(N, M) + 1J * numpy.random.rand(N, M)
             return rand
     
-        self.x_tensors = [create_tensor(D, self.right_dims[i]) for i in range(self.right_dim)]
-        self.coeff = 1.0
+        self.x_tensor_r = create_tensor(D, Nr)
+        self.x_tensors_l = [create_tensor(D, linear_dim) for i in range(freq_dim)]
 
-    def var_list(self):
-        """
-        Return a list of model parameters
-        """
-        return self.x_tensors + [self.coeff]
+    def x_tensors(self):
+        return [self.x_tensor_r] + self.x_tensors_l
 
-    def full_tensor_x(self, x_tensors_plus_coeff=None):
-        if x_tensors_plus_coeff == None:
-            return self.coeff * cp_to_full_tensor(self.x_tensors)
-        else:
-            return x_tensors_plus_coeff[-1] * cp_to_full_tensor(x_tensors_plus_coeff[:-1])
-
-    def predict_y(self, x_tensors_plus_coeff=None):
+    def predict_y(self, x_tensors=None):
         """
         Predict y from self.x_tensors
     
@@ -146,50 +142,36 @@ class OvercompleteGFModel(object):
             U_1(n, r, l1) * X_1(d, l1) -> UX_1(n, r, d)
             U_2(n, r, l2) * X_2(d, l2) -> UX_2(n, r, d)
         """
-        if x_tensors_plus_coeff == None:
-            x_tensors = self.x_tensors
-            coeff = self.coeff
-        else:
-            x_tensors =x_tensors_plus_coeff[:-1]
-            coeff = x_tensors_plus_coeff[-1]
+        if x_tensors is None:
+            x_tensors = self.x_tensors()
 
-        ones = numpy.full((self.Nw,),1)
-        result = numpy.einsum('dr,n->nrd', x_tensors[0], ones)
-        for i in range(1, self.right_dim):
-            UX = numpy.einsum('nrl,dl->nrd', self.tensors_A[i-1], x_tensors[i])
-            result *= UX
-        # At this point, "result" is shape of (Nw, Nr, D).
-        return coeff * numpy.sum(result, axis = (1, 2))
+        if self.freq_dim == 2:
+            return numpy.einsum('wrl,wrm, dr,dl,dm->w', *(self.tensors_A + x_tensors), optimize=True)
+        elif self.freq_dim == 3:
+            return numpy.einsum('wrl,wrm,wrn, dr,dl,dm,dn->w', *(self.tensors_A + x_tensors), optimize=True)
 
-    def loss(self, x_tensors_plus_coeff=None):
+    def loss(self, x_tensors=None):
         """
         Compute mean squared error + L2 regularization term
         """
-        if x_tensors_plus_coeff == None:
-            x_tensors = self.x_tensors
-            coeff = self.coeff
-        else:
-            x_tensors =x_tensors_plus_coeff[:-1]
-            coeff = x_tensors_plus_coeff[-1]
+        if x_tensors is None:
+            x_tensors = self.x_tensors()
 
-        y_pre = self.predict_y(x_tensors + [coeff])
+        y_pre = self.predict_y(x_tensors)
         assert self.y.shape == y_pre.shape
 
         r = squared_L2_norm(self.y - y_pre)
-        tmp = coeff**(2./len(x_tensors))
         for t in x_tensors:
-            r += tmp * self.alpha * squared_L2_norm(t)
+            r += self.alpha * squared_L2_norm(t)
         return r/self.Nw
 
     def update_alpha(self, target_ratio=1e-8):
         """
         Update alpha so that L2 regularization term/residual term ~ target_ratio
         """
-        x_tensors = self.x_tensors
-        coeff = self.coeff
-        assert coeff == 1.0
+        x_tensors = self.x_tensors()
 
-        y_pre = self.predict_y(x_tensors + [coeff])
+        y_pre = self.predict_y(x_tensors)
 
         res = squared_L2_norm(self.y - y_pre)
         reg = numpy.sum([squared_L2_norm(t) for t in x_tensors])
@@ -198,18 +180,14 @@ class OvercompleteGFModel(object):
 
         return self.alpha
 
-    def mse(self, x_tensors_plus_coeff=None):
+    def mse(self, x_tensors=None):
         """
         Compute mean squared error
         """
-        if x_tensors_plus_coeff == None:
-            x_tensors = self.x_tensors
-            coeff = self.coeff
-        else:
-            x_tensors = x_tensors_plus_coeff[:-1]
-            coeff = x_tensors_plus_coeff[-1]
+        if x_tensors is None:
+            x_tensors = self.x_tensors()
 
-        y_pre = self.predict_y(x_tensors + [coeff])
+        y_pre = self.predict_y(x_tensors)
         assert self.y.shape == y_pre.shape
         return (squared_L2_norm(self.y - y_pre))/self.Nw
 
@@ -297,56 +275,52 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm
     freq_dim = model.freq_dim
     linear_dim = model.linear_dim
     tensors_A = model.tensors_A
-    x_tensors = model.x_tensors
-    coeff = model.coeff
+    x_tensor_r = model.x_tensor_r
+    x_tensors_l = model.x_tensors_l
     y = model.y
-
-    # UXs is defined as follows.
-    #for i in range(freq_dim):
-    #    UXs[i, :, :, :] = numpy.einsum('nrl,dl->nrd', tensors_A[i], x_tensors[i+1])
-    UXs = numpy.empty((freq_dim, Nw, Nr, D), dtype=complex)
-    for i in range(freq_dim):
-        UXs[i, :, :, :] = numpy.einsum('nrl,dl->nrd', tensors_A[i], x_tensors[i+1])
 
     def update_core_tensor():
         """
         Build a least squares model for optimizing core tensor
         """
         t1 = time.time()
-        A_lsm = coeff * numpy.prod(UXs, axis=0)
+        if freq_dim == 2:
+            A_lsm = numpy.einsum('wrl,wrm, dl,dm->wdr', *(tensors_A + x_tensors_l), optimize=True)
+        elif freq_dim == 3:
+            A_lsm = numpy.einsum('wrl,wrm,wrn, dl,dm,dn->wdr', *(tensors_A + x_tensors_l), optimize=True)
 
         # Transpose A_lsm from (Nw, R, D) to (Nw, D, R)
-        A_lsm = numpy.transpose(A_lsm, [0, 2, 1])
         t2 = time.time()
-        new_core_tensor, diff = __ridge_complex(Nw, D * Nr, A_lsm, y, model.alpha, x_tensors[0], solver)
+        new_core_tensor, diff = __ridge_complex(Nw, D * Nr, A_lsm, y, model.alpha, x_tensor_r, solver)
         t3 = time.time()
         if verbose >= 2:
             print("core : time ", t2-t1, t3-t2)
-        model.x_tensors[0] = numpy.reshape(new_core_tensor, [D, Nr])
+        model.x_tensor_r = numpy.reshape(new_core_tensor, [D, Nr])
 
         return diff
 
     def update_l_tensor(pos):
-        assert pos > 0
+        assert pos >= 0
 
         t1 = time.time()
-        mask = numpy.arange(freq_dim) != pos-1
-        UX_prod = numpy.prod(UXs[mask, :, :, :], axis=0)
-        UX_prod = numpy.einsum('nrd,dr->nrd', UX_prod, x_tensors[0])
+        mask = numpy.arange(freq_dim) != pos
+        tensors_A_masked = list(compress(tensors_A, mask))
+        x_tensors_l_masked = list(compress(x_tensors_l, mask))
 
-        # This is slow part.
-        A_lsm = coeff * numpy.sum(numpy.einsum('nrd,nrl->nrdl', UX_prod, tensors_A[pos-1]), axis=1)
+        if freq_dim == 2:
+            tmp = numpy.einsum('wrl, dr, dl->wrd', *(tensors_A_masked + [x_tensor_r] + x_tensors_l_masked), optimize=True)
+        elif freq_dim == 3:
+            tmp = numpy.einsum('wrl,wrm, dr, dl,dm->wrd', *(tensors_A_masked + [x_tensor_r] + x_tensors_l_masked), optimize=True)
+        A_lsm = numpy.einsum('wrd,wrl->wdl', tmp, tensors_A[pos], optimize=True)
 
         # At this point, A_lsm is shape of (Nw, D, Nl)
         t2 = time.time()
-        new_tensor, diff = __ridge_complex(Nw, D*linear_dim, A_lsm, y, model.alpha, x_tensors[pos], solver)
+        new_tensor, diff = __ridge_complex(Nw, D*linear_dim, A_lsm, y, model.alpha, x_tensors_l[pos], solver)
         t3 = time.time()
         if verbose >= 2:
             print("rest : time ", t2-t1, t3-t2)
 
-        model.x_tensors[pos] = numpy.reshape(new_tensor, [D, linear_dim])
-
-        UXs[pos-1, :, :, :] = numpy.tensordot(tensors_A[pos-1], x_tensors[pos].transpose((1,0)), axes=(2,0))
+        model.x_tensors_l[pos] = numpy.reshape(new_tensor, [D, linear_dim])
 
         return diff
 
@@ -358,32 +332,33 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm
         # Optimize core tensor
         loss += update_core_tensor()
 
-        if numpy.linalg.norm(model.x_tensors[0]) < min_norm:
-            if verbose > 2:
-                for i, x in enumerate(model.x_tensors):
-                    print("norm of x ", i, numpy.linalg.norm(x))
-            info = {}
-            info['losss'] = losss
-            return info
+        #if numpy.linalg.norm(model.x_tensor_r) < min_norm:
+            #if verbose > 2:
+                #for i, x in enumerate(model.x_tensors):
+                    #print("norm of x ", i, numpy.linalg.norm(x))
+            #info = {}
+            #info['losss'] = losss
+            #return info
 
         assert not loss is None
 
         # Optimize the other tensors
-        for pos in range(1, model.freq_dim+1):
+        for pos in range(model.freq_dim):
             loss += update_l_tensor(pos)
 
             assert not loss is None
 
-            if numpy.linalg.norm(model.x_tensors[pos]) < min_norm:
-                info = {}
-                info['losss'] = losss
-                return info
+            #if numpy.linalg.norm(model.x_tensors[pos]) < min_norm:
+                #info = {}
+                #info['losss'] = losss
+                #return info
 
         losss.append(loss)
 
         if epoch%20 == 0:
             loss = model.loss()
             rmses.append(numpy.sqrt(model.mse()))
+            print("epoch = ", epoch, " loss = ", losss[-1], " rmse = ", rmses[-1], " alpha = ", model.alpha)
             if verbose > 0:
                 print("epoch = ", epoch, " loss = ", losss[-1], " rmse = ", rmses[-1], " alpha = ", model.alpha)
                 for i, x in enumerate(model.x_tensors):
