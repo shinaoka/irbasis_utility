@@ -88,6 +88,8 @@ class OvercompleteGFModel(object):
         """
 
         self.y = numpy.array(y, dtype=complex)
+        assert y.shape[0] == num_w
+        assert y.shape[1] == num_orb
         self.tensors_A = [numpy.array(t, dtype=complex) for t in tensors_A]
         self.alpha = alpha
         self.num_w = num_w
@@ -107,6 +109,12 @@ class OvercompleteGFModel(object):
 
     def x_tensors(self):
         return [self.x_r] + self.xs_l + self.xs_orb
+
+    def full_tensor_x(self, x_tensors=None):
+        if x_tensors is None:
+            return cp_to_full_tensor(self.x_tensors())
+        else:
+            return cp_to_full_tensor(x_tensors)
 
     def predict_y(self, x_tensors=None):
         """
@@ -213,7 +221,13 @@ def __normalize_tensor(tensor):
     norm = numpy.linalg.norm(tensor)
     return tensor/norm, norm
 
-def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm=1e-8, optimize_alpha=-1):
+def __sketch(tensors_A, y, sketch_size):
+    num_w = y.shape[0]
+    idx = numpy.random.choice(numpy.arange(num_w), sketch_size, replace=False)
+    return [t[idx,:,:] for t in tensors_A], y[idx,:,:,:,:]
+
+
+def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm=1e-8, optimize_alpha=-1, sketch_size_fact=10.0):
     """
     Alternating least squares
 
@@ -261,15 +275,19 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm
         Build a least squares model for optimizing core tensor
         """
         t1 = time.time()
+
+        num_w_sk = min(num_w, int(sketch_size_fact * D * num_rep))
+        tensors_A_sk, y_sk = __sketch(tensors_A, y, num_w_sk)
+
         if freq_dim == 2:
             A_lsm = numpy.einsum('wrl,wrm, dl,dm, de,df,dg,dh->w efgh dr',
-                                 *(tensors_A + model.xs_l + model.xs_orb), optimize=True)
+                                 *(tensors_A_sk + model.xs_l + model.xs_orb), optimize=True)
         elif freq_dim == 3:
             A_lsm = numpy.einsum('wrl,wrm,wrn, dl,dm,dn, de,df,dg,dh -> w efgh dr',
-                                 *(tensors_A + model.xs_l + model.xs_orb), optimize=True)
+                                 *(tensors_A_sk + model.xs_l + model.xs_orb), optimize=True)
 
         t2 = time.time()
-        new_core_tensor, diff = __ridge_complex(num_w*num_orb**4, D * num_rep, A_lsm, y, model.alpha, model.x_r, solver)
+        new_core_tensor, diff = __ridge_complex(num_w_sk*num_orb**4, D * num_rep, A_lsm, y_sk, model.alpha, model.x_r, solver)
         t3 = time.time()
         if verbose >= 2:
             print("core : time ", t2-t1, t3-t2)
@@ -281,8 +299,11 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm
         assert pos >= 0
 
         t1 = time.time()
+        num_w_sk = min(num_w, int(sketch_size_fact * D * linear_dim))
+        tensors_A_sk, y_sk = __sketch(tensors_A, y, num_w_sk)
+
         mask = numpy.arange(freq_dim) != pos
-        tensors_A_masked = list(compress(tensors_A, mask))
+        tensors_A_masked = list(compress(tensors_A_sk, mask))
         xs_l_masked = list(compress(model.xs_l, mask))
 
         if freq_dim == 2:
@@ -291,11 +312,11 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm
         elif freq_dim == 3:
             tmp = numpy.einsum('wrl,wrm, dr, dl,dm, de,df,dg,dh -> wefgh rd',
                                *(tensors_A_masked + [model.x_r] + xs_l_masked + model.xs_orb), optimize=True)
-        A_lsm = numpy.einsum('wefgh rd, wrl->wefgh dl', tmp, tensors_A[pos], optimize=True)
+        A_lsm = numpy.einsum('wefgh rd, wrl->wefgh dl', tmp, tensors_A_sk[pos], optimize=True)
 
         # At this point, A_lsm is shape of (num_w, num_orb, num_orb, num_orb, num_orb, D, Nl)
         t2 = time.time()
-        new_tensor, diff = __ridge_complex(num_w*num_orb**4, D*linear_dim, A_lsm, y, model.alpha, model.xs_l[pos], solver)
+        new_tensor, diff = __ridge_complex(num_w_sk*num_orb**4, D*linear_dim, A_lsm, y_sk, model.alpha, model.xs_l[pos], solver)
         t3 = time.time()
         if verbose >= 2:
             print("rest : time ", t2-t1, t3-t2)
@@ -308,15 +329,18 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm
         diff = 0.0
 
         t1 = time.time()
+        num_w_sk = min(num_w, int(sketch_size_fact * D * num_orb))
+        tensors_A_sk, y_sk = __sketch(tensors_A, y, num_w_sk)
+
         mask = numpy.arange(4) != orb_pos
         xs_orb_masked = list(compress(model.xs_orb, mask))
 
         if freq_dim == 2:
             A_lsm = numpy.einsum('wrl,wrm, dr, dl,dm, de,df,dg -> wefg d',
-                               *(tensors_A+ [model.x_r] + model.xs_l + xs_orb_masked), optimize=True)
+                               *(tensors_A_sk+ [model.x_r] + model.xs_l + xs_orb_masked), optimize=True)
         elif freq_dim == 3:
             A_lsm = numpy.einsum('wrl,wrm,wrn, dr, dl,dm,dn, de,df,dg -> wefg d',
-                                 *(tensors_A+ [model.x_r] + model.xs_l + xs_orb_masked), optimize=True)
+                                 *(tensors_A_sk+ [model.x_r] + model.xs_l + xs_orb_masked), optimize=True)
 
         # At this point, A_lsm is shape of (num_w, num_orb, num_orb, num_orb, D)
         # (wefg, d) * (dh) = wefgh
@@ -325,9 +349,9 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm
         new_axis = numpy.arange(5).tolist()
         del new_axis[orb_pos+1]
         new_axis.append(orb_pos+1)
-        y_swapped = y.transpose(new_axis)
+        y_swapped = y_sk.transpose(new_axis)
         for i_orb in range(num_orb):
-            new_tensor, diff_tmp = __ridge_complex(num_w*num_orb**3, D, A_lsm,
+            new_tensor, diff_tmp = __ridge_complex(num_w_sk*num_orb**3, D, A_lsm,
                                                    y_swapped[:, :,:,:,i_orb],
                                                    model.alpha, model.xs_orb[orb_pos][:,i_orb], solver)
             model.xs_orb[orb_pos][:,i_orb] = new_tensor
@@ -346,35 +370,36 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm
     for epoch in epochs:
         # Optimize r tensor
         t1 = time.time()
-        loss += update_r_tensor()
+        update_r_tensor()
 
         assert not loss is None
 
         t2 = time.time()
         # Optimize the other tensors
         for pos in range(model.freq_dim):
-            loss += update_l_tensor(pos)
+            update_l_tensor(pos)
 
             assert not loss is None
         t3 = time.time()
 
         for pos in range(4):
-            loss += update_orb_tensor(pos)
+            update_orb_tensor(pos)
 
             assert not loss is None
         t4 = time.time()
 
         #print(t2-t1, t3-t2, t4-t3)
 
+        loss = model.loss()
         losss.append(loss)
 
-        #print("epoch = ", epoch, " loss = ", loss, model.loss(), numpy.sqrt(model.mse()))
+        print("epoch = ", epoch, " loss = ", loss, model.loss(), numpy.sqrt(model.mse()))
         if epoch%20 == 0:
             loss = model.loss()
             rmses.append(numpy.sqrt(model.mse()))
             if verbose > 0:
                 print("epoch = ", epoch, " loss = ", losss[-1], " rmse = ", rmses[-1], " alpha = ", model.alpha)
-                for i, x in enumerate(model.x_tensors):
+                for i, x in enumerate(model.x_tensors()):
                     print("norm of x ", i, numpy.linalg.norm(x))
 
         if len(rmses) > 2:
