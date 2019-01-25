@@ -283,6 +283,10 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm
     tensors_A = model.tensors_A
     y = model.y
 
+    num_params = numpy.sum([x.size for x in model.x_tensors()])
+    print("num_params", num_params)
+    sketch_size = min(num_w, int(sketch_size_fact * num_params))
+
     def update_r_tensor():
         """
         Build a least squares model for optimizing core tensor
@@ -297,7 +301,6 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm
                                  *(tensors_A+ model.xs_l + [model.x_orb]), optimize=True)
 
         t2 = time.time()
-        sketch_size = min(num_w*num_orb**4, int(sketch_size_fact * D * num_rep))
         idx = __sketch_idx(num_w*num_orb**4, sketch_size)
 
         new_core_tensor, diff = __ridge_complex(sketch_size, D * num_rep, A_lsm.reshape((num_w*num_orb**4,-1))[idx,:],
@@ -328,7 +331,6 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm
 
         # At this point, A_lsm is shape of (num_w, num_orb, num_orb, num_orb, num_orb, D, Nl)
         t2 = time.time()
-        sketch_size = min(num_w*num_orb**4, int(sketch_size_fact * D * linear_dim))
         idx = __sketch_idx(num_w*num_orb**4, sketch_size)
         new_tensor, diff = __ridge_complex(sketch_size, D*linear_dim,
                                            A_lsm.reshape((num_w*num_orb**4, -1))[idx,:],
@@ -354,7 +356,6 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm
             A_lsm = numpy.einsum('wrl,wrm,wrn, dr, dl,dm,dn -> w d',
                                  *(tensors_A + [model.x_r] + model.xs_l), optimize=True)
 
-        sketch_size = min(num_w, int(sketch_size_fact * D))
         idx = __sketch_idx(num_w, sketch_size)
 
         # At this point, A_lsm is shape of (num_w, D)
