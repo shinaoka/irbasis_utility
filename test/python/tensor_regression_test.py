@@ -46,7 +46,7 @@ class TestMethods(unittest.TestCase):
         for solver in ['svd', 'lsqr']:
             numpy.random.seed(100)
             model = OvercompleteGFModel(Nw, Nr, freq_dim, num_orb, linear_dim, tensors_A, y, alpha, D)
-            info = optimize_als(model, nite = 1000, tol_rmse=1e-10, verbose=0, solver=solver)
+            info = optimize_als(model, nite = 1000, tol_rmse=1e-10, verbose=0, sketch_size_fact=1E+8, solver=solver)
 
             #print("loss", info['losss'][-1])
             #for i, loss in enumerate(info['losss']):
