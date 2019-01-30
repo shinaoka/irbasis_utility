@@ -184,8 +184,44 @@ class OvercompleteGFModel(object):
         assert self.y.shape == y_pre.shape
         return (squared_L2_norm(self.y - y_pre))/y_pre.size
 
-class EinsumLinearOperator(LinearOperator):
-    def __init__(self):
+#class EinsumLinearOperator(LinearOperator):
+    #def __init__(self):
+
+"""
+def linear_operator_l(N1, N2, tensors_A_masked, tensors_A_pos, x_r, xs_l_masked, x_orb):
+    # tensors_A_masked  wrl
+    # x_r               dr
+    # xs_l_masked       dl
+    #   ===> wrd
+    tmp_wrd1 = numpy.einsum('wrl, dr, dl-> wrd', *(tensors_A_masked + [x_r] + xs_l_masked), optimize=True)
+
+    num_w = tensors_A_masked.shape[0]
+    num_o = x_orb.shape[1]
+
+    def matvec(x):
+        # x                 dm
+        # tensors_A_pos     wrm
+        #   ===> wrd
+        # x_orb             do
+        tmp_wrd2 = numpy.einsum('dm, wrm -> wrd', x, tensors_A_pos, optimize=True)
+        tmp_wd = numpy.einsum('wrd, wrd -> wd', tmp_wrd1, tmp_wrd2, optimize=True)
+        return numpy.einsum('wd, do -> wo', tmp_wd, x_orb, optimize=True).reshape(-1)
+
+    tmp_wdm = numpy.einsum('wrd, wrm -> wdm', tmp_wrd1, tensors_A_pos, optimize=True)
+    def rmatvec(y):
+        # tmp_wrd1          wrd
+        # tensors_A_pos     wrm
+        #    ===> wdm
+        # y                 wo
+        #    ===> dmo
+        # x_orb             do
+        #    ===> dm
+        tmp_dmo = numpy.einsum('wdm, wo -> dmo', tmp_wdm, y.reshape((num_w, num_o)), optimize=True)
+        return numpy.einsum('dmo, do -> dm', tmp_dmo, x_orb, optimize=True).reshape(-1)
+
+"""
+
+
 
 
 def __ridge_complex_lsmr(N1, N2, A, y, alpha, verbose=0):
