@@ -184,23 +184,20 @@ class OvercompleteGFModel(object):
         assert self.y.shape == y_pre.shape
         return (squared_L2_norm(self.y - y_pre))/y_pre.size
 
-#class EinsumLinearOperator(LinearOperator):
-    #def __init__(self):
-
 def linear_operator_r(N1, N2, tensors_A, x_r, xs_l, x_orb):
-    A_lsm = numpy.einsum('wrl,wrm, dl,dm, do, dr->w o', *(tensors_A + xs_l + [x_orb] + [x]), optimize=True)
-
     num_w, R, linear_dim = tensors_A[0].shape
     D = x_r.shape[0]
     num_o = x_orb.shape[1]
 
+    tmp_wrd = numpy.einsum('wrl,wrm, dl,dm -> wrd', *(tensors_A + xs_l), optimize=True)
+
     def matvec(x):
         x = x.reshape((D, R))
-        return numpy.einsum('wrl,wrm, dl,dm, do, dr->wo', *(tensors_A + xs_l + [x_orb] + [x]), optimize=True).reshape(-1)
+        return numpy.einsum('wrd, do, dr->wo', tmp_wrd, x_orb, x, optimize=True).reshape(-1)
 
     def rmatvec(y):
         y_c = y.reshape((num_w, num_o)).conjugate()
-        x_c = numpy.einsum('wrl,wrm, dl,dm, do, wo->dr', *(tensors_A + xs_l + [x_orb] + [y_c]), optimize=True).reshape(-1)
+        x_c = numpy.einsum('wrd, do, wo->dr', tmp_wrd, x_orb, y_c, optimize=True).reshape(-1)
         return x_c.conjugate()
 
     return LinearOperator((N1, N2), matvec=matvec, rmatvec=rmatvec)
@@ -230,73 +227,28 @@ def linear_operator_l(N1, N2, tensors_A_masked, tensors_A_pos, x_r, xs_l_masked,
     # tmp_wrd1          wrd
     # tensors_A_pos     wrn
     #    ===> wdn
-    tmp_wdn = numpy.einsum('wrd, wrn -> wdn', tmp_wrd1, tensors_A_pos, optimize=True)
+    tmp_wdn = numpy.einsum('wrd, wrn -> wdn', tmp_wrd1, tensors_A_pos, optimize=True).conjugate()
     def rmatvec(y):
         # Note: do not forget to take complex conjugate of A
         # y                 wo
         #    ===> dno
         # x_orb             do
         #    ===> dn
-        tmp_dno = numpy.einsum('wdn, wo -> dno', numpy.conj(tmp_wdn), y.reshape((num_w, num_o)), optimize=True)
+        tmp_dno = numpy.einsum('wdn, wo -> dno', tmp_wdn, y.reshape((num_w, num_o)), optimize=True)
         return numpy.einsum('dno, do -> dn', tmp_dno, numpy.conj(x_orb), optimize=True).reshape(-1)
 
     return LinearOperator((N1, N2), matvec=matvec, rmatvec=rmatvec)
 
-
-
-def __ridge_complex_lsmr(N1, N2, A, y, alpha, verbose=0):
+def __ridge_complex_lsmr(N1, N2, A, y, alpha, num_data=1, verbose=0):
     if isinstance(A, numpy.ndarray):
-        r = lsmr(A.reshape((N1,N2)), y.reshape(N1), damp=numpy.sqrt(alpha))
+        r = lsmr(A.reshape((N1,N2)), y.reshape((N1, num_data)), damp=numpy.sqrt(alpha))
     else:
-        r = lsmr(A, y.reshape(N1), damp=numpy.sqrt(alpha))
+        r = lsmr(A, y.reshape((N1, num_data)), damp=numpy.sqrt(alpha))
     return r[0]
-
-
-def __ridge_complex(N1, N2, A, y, alpha, x_old, solver='svd', precond=None, verbose=0):
-    A_numpy = A.reshape((N1, N2))
-    y_numpy = y.reshape((N1,))
-    x_old_numpy = x_old.reshape((N2,))
-
-    try:
-        if solver == 'svd':
-            try:
-                x_numpy = ridge_complex(A_numpy, y_numpy, alpha, solver='svd')
-            except LinAlgError:
-                if verbose > 0:
-                    print("svd did not converge, falling back to lsqr...")
-                x_numpy = ridge_complex(A_numpy, y_numpy, alpha, solver='lsqr')
-
-        elif solver == 'lsqr':
-            x_numpy = ridge_complex(A_numpy, y_numpy, alpha, solver='lsqr', x0=x_old_numpy, precond=precond, verbose=verbose)
-        else:
-            raise RuntimeError("Unsupported solver: " + solver)
-    except:
-        print("A: ", A_numpy)
-        print("y: ", y_numpy)
-        print("alpha: ", alpha)
-        raise RuntimeError("Error in ridge_complex")
-
-    new_loss =  numpy.linalg.norm(y_numpy - numpy.dot(A_numpy, x_numpy))**2 + alpha * numpy.linalg.norm(x_numpy)**2
-    old_loss = numpy.linalg.norm(y_numpy - numpy.dot(A_numpy, x_old_numpy))**2 + alpha * numpy.linalg.norm(x_old_numpy)**2
-    loss_diff = new_loss - old_loss
-
-    if verbose > 0 and loss_diff > 0 and numpy.abs(loss_diff) > 1e-8 * numpy.abs(new_loss):
-        U, S, V = scipy.linalg.svd(A_numpy)
-        print("Warning loss_diff > 0!: loss_diff = ", loss_diff)
-        print("    condA", S[0]/S[-1], S[0], S[-1])
-        print("    ", numpy.linalg.norm(y_numpy - numpy.dot(A_numpy, x_numpy))**2)
-        print("    ", numpy.linalg.norm(y_numpy - numpy.dot(A_numpy, x_old_numpy))**2)
-        print("    ", alpha * numpy.linalg.norm(x_numpy)**2)
-        print("    ", alpha * numpy.linalg.norm(x_old_numpy)**2)
-
-    return x_numpy, loss_diff
 
 def __normalize_tensor(tensor):
     norm = numpy.linalg.norm(tensor)
     return tensor/norm, norm
-
-def __sketch_idx(N, sketch_size):
-    return numpy.sort(numpy.random.choice(numpy.arange(N), min(N, sketch_size), replace=False))
 
 def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm=1e-8, optimize_alpha=-1, print_interval=20):
     """
@@ -349,16 +301,10 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm
         """
         t1 = time.time()
 
-        if freq_dim == 2:
-            A_lsm = numpy.einsum('wrl,wrm, dl,dm, do->w o dr',
-                                 *(tensors_A+ model.xs_l + [model.x_orb]), optimize=True)
-        elif freq_dim == 3:
-            A_lsm = numpy.einsum('wrl,wrm,wrn, dl,dm,dn, do -> w o dr',
-                                 *(tensors_A+ model.xs_l + [model.x_orb]), optimize=True)
 
         t2 = time.time()
-
-        new_core_tensor, _ = __ridge_complex(num_w*num_o, D * num_rep, A_lsm, y, model.alpha, model.x_r, solver)
+        A_op = linear_operator_r(num_w*num_o, D*num_rep, tensors_A, model.x_r, model.xs_l, model.x_orb)
+        new_core_tensor = __ridge_complex_lsmr(num_w*num_o, D * num_rep, A_op, y, model.alpha)
         t3 = time.time()
         if verbose >= 2:
             print("core : time ", t2-t1, t3-t2)
@@ -396,10 +342,8 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm
                                  *(tensors_A + [model.x_r] + model.xs_l), optimize=True)
 
         # At this point, A_lsm is shape of (num_w, D)
-        # TODO: VECTERIZE
         for o in range(num_o):
-            new_tensor, _ = __ridge_complex(num_w, D, A_lsm, y[:, o],
-                                                   model.alpha, model.x_orb[:, o], solver)
+            new_tensor = __ridge_complex_lsmr(num_w, D, A_lsm, y[:, o], model.alpha)
             model.x_orb[:, o] = new_tensor
 
         t3 = time.time()
