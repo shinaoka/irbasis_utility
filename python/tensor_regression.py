@@ -240,7 +240,7 @@ def __sketch(tensors_A, y, sketch_size):
     return [t[idx,:,:] for t in tensors_A], y[idx,:,:,:,:]
 
 
-def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm=1e-8, optimize_alpha=-1, sketch_size_fact=1E+8, print_interval=20):
+def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm=1e-8, optimize_alpha=-1, print_interval=20):
     """
     Alternating least squares
 
@@ -284,8 +284,8 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm
     y = model.y
 
     num_params = numpy.sum([x.size for x in model.x_tensors()])
-    print("num_params", num_params)
-    sketch_size = min(num_w, int(sketch_size_fact * num_params))
+
+    num_o = num_orb**4
 
     def update_r_tensor():
         """
@@ -301,10 +301,8 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm
                                  *(tensors_A+ model.xs_l + [model.x_orb]), optimize=True)
 
         t2 = time.time()
-        idx = __sketch_idx(num_w*num_orb**4, sketch_size)
 
-        new_core_tensor, diff = __ridge_complex(sketch_size, D * num_rep, A_lsm.reshape((num_w*num_orb**4,-1))[idx,:],
-                                                y.reshape(-1)[idx], model.alpha, model.x_r, solver)
+        new_core_tensor, diff = __ridge_complex(num_w*num_o, D * num_rep, A_lsm, y, model.alpha, model.x_r, solver)
         t3 = time.time()
         if verbose >= 2:
             print("core : time ", t2-t1, t3-t2)
@@ -331,11 +329,7 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm
 
         # At this point, A_lsm is shape of (num_w, num_orb, num_orb, num_orb, num_orb, D, Nl)
         t2 = time.time()
-        idx = __sketch_idx(num_w*num_orb**4, sketch_size)
-        new_tensor, diff = __ridge_complex(sketch_size, D*linear_dim,
-                                           A_lsm.reshape((num_w*num_orb**4, -1))[idx,:],
-                                           y.reshape(-1)[idx],
-                                           model.alpha, model.xs_l[pos], solver)
+        new_tensor, diff = __ridge_complex(num_w*num_o, D*linear_dim, A_lsm, y, model.alpha, model.xs_l[pos], solver)
         t3 = time.time()
         if verbose >= 2:
             print("rest : time ", t2-t1, t3-t2)
@@ -356,12 +350,10 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm
             A_lsm = numpy.einsum('wrl,wrm,wrn, dr, dl,dm,dn -> w d',
                                  *(tensors_A + [model.x_r] + model.xs_l), optimize=True)
 
-        idx = __sketch_idx(num_w, sketch_size)
-
         # At this point, A_lsm is shape of (num_w, D)
         # TODO: VECTERIZE
         for i, j, k, l in product(range(num_orb), repeat=4):
-            new_tensor, diff_tmp = __ridge_complex(sketch_size, D, A_lsm[idx,:], y[idx, i, j, k, l],
+            new_tensor, diff_tmp = __ridge_complex(num_w, D, A_lsm, y[:, i, j, k, l],
                                                    model.alpha, model.x_orb[:, i, j, k, l], solver)
             model.x_orb[:, i, j, k, l] = new_tensor
             diff += diff_tmp
@@ -374,31 +366,26 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm
 
     losss = []
     epochs = range(nite)
-    loss = model.loss()
     rmses = []
     for epoch in epochs:
         # Optimize r tensor
         t1 = time.time()
         update_r_tensor()
 
-        assert not loss is None
-
         t2 = time.time()
         # Optimize the other tensors
         for pos in range(model.freq_dim):
             update_l_tensor(pos)
 
-            assert not loss is None
         t3 = time.time()
 
         update_orb_tensor()
 
-        assert not loss is None
         t4 = time.time()
 
-        print(t2-t1, t3-t2, t4-t3)
+        #print(t2-t1, t3-t2, t4-t3)
 
-        #print("epoch = ", epoch, " loss = ", loss, model.loss(), numpy.sqrt(model.mse()))
+        #print("epoch = ", epoch, " loss = ", model.loss(), numpy.sqrt(model.mse()))
         if epoch%print_interval == 0:
             loss = model.loss()
             losss.append(loss)

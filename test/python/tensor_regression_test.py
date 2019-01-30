@@ -20,11 +20,11 @@ class TestMethods(unittest.TestCase):
     def test_als(self):
         numpy.random.seed(100)
 
-        Nw = 100
+        Nw = 50
         Nr = 2
         linear_dim = 2
         freq_dim = 2
-        D = 20
+        D = 30
         num_orb = 2
         alpha = 0.1
 
@@ -46,12 +46,12 @@ class TestMethods(unittest.TestCase):
         for solver in ['svd', 'lsqr']:
             numpy.random.seed(100)
             model = OvercompleteGFModel(Nw, Nr, freq_dim, num_orb, linear_dim, tensors_A, y, alpha, D)
-            info = optimize_als(model, nite = 1000, tol_rmse=1e-10, verbose=0, sketch_size_fact=1E+8, solver=solver)
+            info = optimize_als(model, nite = 200, tol_rmse=1e-10, verbose=0, solver=solver)
 
             #print("loss", info['losss'][-1])
             #for i, loss in enumerate(info['losss']):
                 #print(i, loss)
-            self.assertLess(numpy.abs(info['rmses'][-1] - info['rmses'][-2]), 1e-9)
+            self.assertLess(numpy.abs(info['losss'][-1] - info['losss'][-2])/numpy.abs(info['losss'][-2]), 2e-4)
 
 
 if __name__ == '__main__':
