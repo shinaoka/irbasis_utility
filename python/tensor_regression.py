@@ -3,8 +3,9 @@ from __future__ import print_function
 from .regression import ridge_complex
 
 import numpy
-from scipy.linalg import LinAlgError
 import scipy
+from scipy.linalg import LinAlgError
+from scipy.sparse.linalg import lsmr, LinearOperator
 
 from itertools import compress, product
 import time
@@ -183,8 +184,17 @@ class OvercompleteGFModel(object):
         assert self.y.shape == y_pre.shape
         return (squared_L2_norm(self.y - y_pre))/y_pre.size
 
+class EinsumLinearOperator(LinearOperator):
+    def __init__(self):
+
+
+def __ridge_complex_lsmr(N1, N2, A, y, alpha, verbose=0):
+    r = lsmr(A, y, damp=numpy.sqrt(alpha))
+    return r[0]
 
 def __ridge_complex(N1, N2, A, y, alpha, x_old, solver='svd', precond=None, verbose=0):
+
+
     A_numpy = A.reshape((N1, N2))
     y_numpy = y.reshape((N1,))
     x_old_numpy = x_old.reshape((N2,))
@@ -228,17 +238,7 @@ def __normalize_tensor(tensor):
     return tensor/norm, norm
 
 def __sketch_idx(N, sketch_size):
-    return numpy.sort(numpy.random.choice(numpy.arange(N), sketch_size, replace=False))
-
-def __sketch(tensors_A, y, sketch_size):
-    num_w = y.shape[0]
-
-    if sketch_size >= num_w:
-        return [tensors_A, y]
-
-    idx = numpy.sort(numpy.random.choice(numpy.arange(num_w), sketch_size, replace=False))
-    return [t[idx,:,:] for t in tensors_A], y[idx,:,:,:,:]
-
+    return numpy.sort(numpy.random.choice(numpy.arange(N), min(N, sketch_size), replace=False))
 
 def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm=1e-8, optimize_alpha=-1, print_interval=20):
     """
@@ -284,7 +284,6 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm
     y = model.y
 
     num_params = numpy.sum([x.size for x in model.x_tensors()])
-
     num_o = num_orb**4
 
     def update_r_tensor():
