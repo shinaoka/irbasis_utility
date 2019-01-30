@@ -54,7 +54,7 @@ class OvercompleteGFModel(object):
         * X_{freq_dim}(d, l)
 
     """
-    def __init__(self, num_w, num_rep, freq_dim, num_orb, linear_dim, tensors_A, y, alpha, D):
+    def __init__(self, num_w, num_rep, freq_dim, num_o, linear_dim, tensors_A, y, alpha, D):
         """
 
         Parameters
@@ -90,13 +90,13 @@ class OvercompleteGFModel(object):
 
         self.y = numpy.array(y, dtype=complex)
         assert y.shape[0] == num_w
-        assert y.shape[1] == num_orb
+        assert y.shape[1] == num_o
         self.tensors_A = [numpy.array(t, dtype=complex) for t in tensors_A]
         self.alpha = alpha
         self.num_w = num_w
         self.num_rep = num_rep
         self.linear_dim = linear_dim
-        self.num_orb = num_orb
+        self.num_o = num_o
         self.freq_dim = freq_dim
         assert self.freq_dim == 2 or self.freq_dim == 3
         self.D = D
@@ -108,7 +108,7 @@ class OvercompleteGFModel(object):
     
         self.x_r = create_tensor(D, num_rep)
         self.xs_l = [create_tensor(D, linear_dim) for i in range(freq_dim)]
-        self.x_orb = numpy.random.rand(D, num_orb, num_orb, num_orb, num_orb) + 1J * numpy.random.rand(D, num_orb, num_orb, num_orb, num_orb)
+        self.x_orb = numpy.random.rand(D, num_o) + 1J * numpy.random.rand(D, num_o)
 
     def x_tensors(self):
         return [self.x_r] + self.xs_l + [self.x_orb]
@@ -118,9 +118,9 @@ class OvercompleteGFModel(object):
             x_tensors = self.x_tensors()
 
         if self.freq_dim == 2:
-            return numpy.einsum('dr, dl,dm, defgh->r lm efgh', *x_tensors, optimize=True)
+            return numpy.einsum('dr, dl,dm, do->r lm o', *x_tensors, optimize=True)
         elif self.freq_dim == 3:
-            return numpy.einsum('dr, dl,dm,dn defgh->r lmn efgh', *x_tensors, optimize=True)
+            return numpy.einsum('dr, dl,dm,dn do->r lmn o', *x_tensors, optimize=True)
 
 
     def predict_y(self, x_tensors=None):
@@ -139,9 +139,9 @@ class OvercompleteGFModel(object):
             x_tensors = self.x_tensors()
 
         if self.freq_dim == 2:
-            return numpy.einsum('wrl,wrm, dr,dl,dm, defgh->wefgh', *(self.tensors_A + x_tensors), optimize=True)
+            return numpy.einsum('wrl,wrm, dr,dl,dm, do->wo', *(self.tensors_A + x_tensors), optimize=True)
         elif self.freq_dim == 3:
-            return numpy.einsum('wrl,wrm,wrn, dr,dl,dm,dn, defgh->wefgh', *(self.tensors_A + x_tensors), optimize=True)
+            return numpy.einsum('wrl,wrm,wrn, dr,dl,dm,dn, do->wo', *(self.tensors_A + x_tensors), optimize=True)
 
     def loss(self, x_tensors=None):
         """
@@ -187,50 +187,72 @@ class OvercompleteGFModel(object):
 #class EinsumLinearOperator(LinearOperator):
     #def __init__(self):
 
-"""
-def linear_operator_l(N1, N2, tensors_A_masked, tensors_A_pos, x_r, xs_l_masked, x_orb):
-    # tensors_A_masked  wrl
-    # x_r               dr
-    # xs_l_masked       dl
-    #   ===> wrd
-    tmp_wrd1 = numpy.einsum('wrl, dr, dl-> wrd', *(tensors_A_masked + [x_r] + xs_l_masked), optimize=True)
+def linear_operator_r(N1, N2, tensors_A, x_r, xs_l, x_orb):
+    A_lsm = numpy.einsum('wrl,wrm, dl,dm, do, dr->w o', *(tensors_A + xs_l + [x_orb] + [x]), optimize=True)
 
-    num_w = tensors_A_masked.shape[0]
+    num_w, R, linear_dim = tensors_A[0].shape
+    D = x_r.shape[0]
     num_o = x_orb.shape[1]
 
     def matvec(x):
-        # x                 dm
-        # tensors_A_pos     wrm
+        x = x.reshape((D, R))
+        return numpy.einsum('wrl,wrm, dl,dm, do, dr->wo', *(tensors_A + xs_l + [x_orb] + [x]), optimize=True).reshape(-1)
+
+    def rmatvec(y):
+        y_c = y.reshape((num_w, num_o)).conjugate()
+        x_c = numpy.einsum('wrl,wrm, dl,dm, do, wo->dr', *(tensors_A + xs_l + [x_orb] + [y_c]), optimize=True).reshape(-1)
+        return x_c.conjugate()
+
+    return LinearOperator((N1, N2), matvec=matvec, rmatvec=rmatvec)
+
+def linear_operator_l(N1, N2, tensors_A_masked, tensors_A_pos, x_r, xs_l_masked, x_orb):
+    # tensors_A_masked  [wrl]
+    # x_r               dr
+    # xs_l_masked       [dl]
+    #   ===> wrd
+    assert len(tensors_A_masked) == 1
+    tmp_wrd1 = numpy.einsum('wrl, dr, dl-> wrd', *(tensors_A_masked + [x_r] + xs_l_masked), optimize=True)
+
+    num_w, R, linear_dim = tensors_A_masked[0].shape
+    D = x_r.shape[0]
+    num_o = x_orb.shape[1]
+
+    def matvec(x):
+        # x                 dn
+        # tensors_A_pos     wrn
         #   ===> wrd
         # x_orb             do
-        tmp_wrd2 = numpy.einsum('dm, wrm -> wrd', x, tensors_A_pos, optimize=True)
+        x = x.reshape((D, linear_dim))
+        tmp_wrd2 = numpy.einsum('dn, wrn -> wrd', x, tensors_A_pos, optimize=True)
         tmp_wd = numpy.einsum('wrd, wrd -> wd', tmp_wrd1, tmp_wrd2, optimize=True)
         return numpy.einsum('wd, do -> wo', tmp_wd, x_orb, optimize=True).reshape(-1)
 
-    tmp_wdm = numpy.einsum('wrd, wrm -> wdm', tmp_wrd1, tensors_A_pos, optimize=True)
+    # tmp_wrd1          wrd
+    # tensors_A_pos     wrn
+    #    ===> wdn
+    tmp_wdn = numpy.einsum('wrd, wrn -> wdn', tmp_wrd1, tensors_A_pos, optimize=True)
     def rmatvec(y):
-        # tmp_wrd1          wrd
-        # tensors_A_pos     wrm
-        #    ===> wdm
+        # Note: do not forget to take complex conjugate of A
         # y                 wo
-        #    ===> dmo
+        #    ===> dno
         # x_orb             do
-        #    ===> dm
-        tmp_dmo = numpy.einsum('wdm, wo -> dmo', tmp_wdm, y.reshape((num_w, num_o)), optimize=True)
-        return numpy.einsum('dmo, do -> dm', tmp_dmo, x_orb, optimize=True).reshape(-1)
+        #    ===> dn
+        tmp_dno = numpy.einsum('wdn, wo -> dno', numpy.conj(tmp_wdn), y.reshape((num_w, num_o)), optimize=True)
+        return numpy.einsum('dno, do -> dn', tmp_dno, numpy.conj(x_orb), optimize=True).reshape(-1)
 
-"""
-
+    return LinearOperator((N1, N2), matvec=matvec, rmatvec=rmatvec)
 
 
 
 def __ridge_complex_lsmr(N1, N2, A, y, alpha, verbose=0):
-    r = lsmr(A, y, damp=numpy.sqrt(alpha))
+    if isinstance(A, numpy.ndarray):
+        r = lsmr(A.reshape((N1,N2)), y.reshape(N1), damp=numpy.sqrt(alpha))
+    else:
+        r = lsmr(A, y.reshape(N1), damp=numpy.sqrt(alpha))
     return r[0]
 
+
 def __ridge_complex(N1, N2, A, y, alpha, x_old, solver='svd', precond=None, verbose=0):
-
-
     A_numpy = A.reshape((N1, N2))
     y_numpy = y.reshape((N1,))
     x_old_numpy = x_old.reshape((N2,))
@@ -315,12 +337,11 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm
     num_w = model.num_w
     freq_dim = model.freq_dim
     linear_dim = model.linear_dim
-    num_orb = model.num_orb
+    num_o = model.num_o
     tensors_A = model.tensors_A
     y = model.y
 
     num_params = numpy.sum([x.size for x in model.x_tensors()])
-    num_o = num_orb**4
 
     def update_r_tensor():
         """
@@ -329,21 +350,19 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm
         t1 = time.time()
 
         if freq_dim == 2:
-            A_lsm = numpy.einsum('wrl,wrm, dl,dm, defgh->w efgh dr',
+            A_lsm = numpy.einsum('wrl,wrm, dl,dm, do->w o dr',
                                  *(tensors_A+ model.xs_l + [model.x_orb]), optimize=True)
         elif freq_dim == 3:
-            A_lsm = numpy.einsum('wrl,wrm,wrn, dl,dm,dn, defgh -> w efgh dr',
+            A_lsm = numpy.einsum('wrl,wrm,wrn, dl,dm,dn, do -> w o dr',
                                  *(tensors_A+ model.xs_l + [model.x_orb]), optimize=True)
 
         t2 = time.time()
 
-        new_core_tensor, diff = __ridge_complex(num_w*num_o, D * num_rep, A_lsm, y, model.alpha, model.x_r, solver)
+        new_core_tensor, _ = __ridge_complex(num_w*num_o, D * num_rep, A_lsm, y, model.alpha, model.x_r, solver)
         t3 = time.time()
         if verbose >= 2:
             print("core : time ", t2-t1, t3-t2)
         model.x_r = numpy.reshape(new_core_tensor, [D, num_rep])
-
-        return diff
 
     def update_l_tensor(pos):
         assert pos >= 0
@@ -354,27 +373,18 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm
         tensors_A_masked = list(compress(tensors_A, mask))
         xs_l_masked = list(compress(model.xs_l, mask))
 
-        if freq_dim == 2:
-            tmp = numpy.einsum('wrl, dr, dl, defgh -> wefgh rd',
-                               *(tensors_A_masked + [model.x_r] + xs_l_masked + [model.x_orb]), optimize=True)
-        elif freq_dim == 3:
-            tmp = numpy.einsum('wrl,wrm, dr, dl,dm, defgh -> wefgh rd',
-                               *(tensors_A_masked + [model.x_r] + xs_l_masked + [model.x_orb]), optimize=True)
-        A_lsm = numpy.einsum('wefgh rd, wrl->wefgh dl', tmp, tensors_A[pos], optimize=True)
+        A_op = linear_operator_l(num_w*num_o, D*linear_dim, tensors_A_masked, tensors_A[pos], model.x_r, xs_l_masked, model.x_orb)
 
-        # At this point, A_lsm is shape of (num_w, num_orb, num_orb, num_orb, num_orb, D, Nl)
+        # At this point, A_lsm is shape of (num_w, num_o, D, Nl)
         t2 = time.time()
-        new_tensor, diff = __ridge_complex(num_w*num_o, D*linear_dim, A_lsm, y, model.alpha, model.xs_l[pos], solver)
+        new_tensor = __ridge_complex_lsmr(num_w*num_o, D*linear_dim, A_op, y, model.alpha)
         t3 = time.time()
         if verbose >= 2:
             print("rest : time ", t2-t1, t3-t2)
 
         model.xs_l[pos] = numpy.reshape(new_tensor, [D, linear_dim])
 
-        return diff
-
     def update_orb_tensor():
-        diff = 0.0
 
         t1 = time.time()
 
@@ -387,17 +397,14 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm
 
         # At this point, A_lsm is shape of (num_w, D)
         # TODO: VECTERIZE
-        for i, j, k, l in product(range(num_orb), repeat=4):
-            new_tensor, diff_tmp = __ridge_complex(num_w, D, A_lsm, y[:, i, j, k, l],
-                                                   model.alpha, model.x_orb[:, i, j, k, l], solver)
-            model.x_orb[:, i, j, k, l] = new_tensor
-            diff += diff_tmp
+        for o in range(num_o):
+            new_tensor, _ = __ridge_complex(num_w, D, A_lsm, y[:, o],
+                                                   model.alpha, model.x_orb[:, o], solver)
+            model.x_orb[:, o] = new_tensor
 
         t3 = time.time()
         if verbose >= 2:
             print("rest : time ", t2-t1, t3-t2)
-
-        return diff
 
     losss = []
     epochs = range(nite)

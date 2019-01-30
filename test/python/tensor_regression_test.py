@@ -25,7 +25,7 @@ class TestMethods(unittest.TestCase):
         linear_dim = 2
         freq_dim = 2
         D = 30
-        num_orb = 2
+        num_o = 2**4
         alpha = 0.1
 
         #Nw = 10000
@@ -40,12 +40,12 @@ class TestMethods(unittest.TestCase):
             return rand
 
         tensors_A = [create_tensor_3(Nw, Nr, linear_dim) for i in range(freq_dim)]
-        y = numpy.random.randn(Nw, num_orb, num_orb, num_orb, num_orb) +\
-            1J * numpy.random.randn(Nw, num_orb, num_orb, num_orb, num_orb)
+        y = numpy.random.randn(Nw, num_o) +\
+            1J * numpy.random.randn(Nw, num_o)
 
         for solver in ['svd', 'lsqr']:
             numpy.random.seed(100)
-            model = OvercompleteGFModel(Nw, Nr, freq_dim, num_orb, linear_dim, tensors_A, y, alpha, D)
+            model = OvercompleteGFModel(Nw, Nr, freq_dim, num_o, linear_dim, tensors_A, y, alpha, D)
             info = optimize_als(model, nite = 200, tol_rmse=1e-10, verbose=0, solver=solver)
 
             #print("loss", info['losss'][-1])
