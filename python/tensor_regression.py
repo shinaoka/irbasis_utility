@@ -260,7 +260,7 @@ def linear_operator_l(N1, N2, tensors_A_masked, tensors_A_pos, x_r, xs_l_masked,
         tmp_wd = numpy.einsum('wrd, wrd -> wd', tmp_wrd1, tmp_wrd2, optimize=True)
         tmp_wo = numpy.einsum('wd, do -> wo', tmp_wd, x_orb, optimize=True).reshape(-1)
         if is_enabled_MPI:
-            return comm.allgather(tmp_wo)
+            return numpy.asarray(comm.allgather(tmp_wo))
         else:
             return tmp_wo
 
