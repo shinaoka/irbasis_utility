@@ -25,6 +25,18 @@ def enable_MPI():
     comm = MPI.COMM_WORLD
     is_master_node = comm.Get_rank() == 0
 
+def mpi_split(work_size, comm_size):
+    base = work_size // comm_size
+    leftover = int(work_size % comm_size)
+
+    sizes = numpy.ones(comm_size, dtype=int) * base
+    sizes[:leftover] += 1
+
+    offsets = numpy.zeros(comm_size, dtype=int)
+    offsets[1:] = numpy.cumsum(sizes)[:-1]
+
+    return sizes, offsets
+
 
 def squared_L2_norm(x):
     """
@@ -239,9 +251,14 @@ def linear_operator_l(N1, N2, tensors_A_masked, tensors_A_pos, x_r, xs_l_masked,
 
 
     if is_enabled_MPI:
+        sizes, offsets = mpi_split(num_w, comm.size)
         rank = comm.Get_rank()
-        tensors_A_masked = [numpy.array_split(t, comm.size)[rank] for t in tensors_A_masked]
-        tensors_A_pos = numpy.array_split(tensors_A_pos, comm.size)[rank]
+        start, end = offsets[rank], offsets[rank] + sizes[rank]
+
+        #print("split ", sizes, offsets, start, end)
+        tensors_A_masked = [t[start:end, :, :] for t in tensors_A_masked]
+        tensors_A_pos = tensors_A_pos[start:end, :, :]
+
 
     if freq_dim == 2:
         tmp_wrd1 = numpy.einsum('wrl, dr, dl-> wrd', *(tensors_A_masked + [x_r] + xs_l_masked), optimize=True)
@@ -260,7 +277,9 @@ def linear_operator_l(N1, N2, tensors_A_masked, tensors_A_pos, x_r, xs_l_masked,
         tmp_wd = numpy.einsum('wrd, wrd -> wd', tmp_wrd1, tmp_wrd2, optimize=True)
         tmp_wo = numpy.einsum('wd, do -> wo', tmp_wd, x_orb, optimize=True).reshape(-1)
         if is_enabled_MPI:
-            return numpy.asarray(comm.allgather(tmp_wo))
+            tmp_wo_all = numpy.empty(num_w * num_o, dtype=complex)
+            comm.Allgatherv(tmp_wo.ravel(), [tmp_wo_all, sizes * num_o, offsets * num_o, MPI.DOUBLE_COMPLEX])
+            return tmp_wo_all
         else:
             return tmp_wo
 
@@ -276,8 +295,12 @@ def linear_operator_l(N1, N2, tensors_A_masked, tensors_A_pos, x_r, xs_l_masked,
         #    ===> dn
         y = y.reshape((num_w, num_o))
         if is_enabled_MPI:
-            tmp_dno = numpy.einsum('wdn, wo -> dno', tmp_wdn, numpy.array_split(y, comm.size)[rank], optimize=True)
-            tmp_dno = comm.allreduce(tmp_dno)
+            tmp_dno_local = numpy.einsum('wdn, wo -> dno', tmp_wdn, y[start:end, :], optimize=True)
+            tmp_dno = numpy.zeros(tmp_dno_local.size, dtype=complex)
+            comm.Allreduce([tmp_dno_local.ravel(), MPI.DOUBLE_COMPLEX], [tmp_dno, MPI.DOUBLE_COMPLEX], op=MPI.SUM)
+            #print("local ", rank, numpy.sum(tmp_dno_local))
+            tmp_dno = tmp_dno.reshape(tmp_dno_local.shape)
+            #print("sum ", rank, numpy.sum(tmp_dno))
         else:
             tmp_dno = numpy.einsum('wdn, wo -> dno', tmp_wdn, y, optimize=True)
         return numpy.einsum('dno, do -> dn', tmp_dno, numpy.conj(x_orb), optimize=True).reshape(-1)
