@@ -189,7 +189,11 @@ def linear_operator_r(N1, N2, tensors_A, x_r, xs_l, x_orb):
     D = x_r.shape[0]
     num_o = x_orb.shape[1]
 
-    tmp_wrd = numpy.einsum('wrl,wrm, dl,dm -> wrd', *(tensors_A + xs_l), optimize=True)
+    freq_dim = len(tensors_A)
+    if freq_dim == 2:
+        tmp_wrd = numpy.einsum('wrl,wrm, dl,dm -> wrd', *(tensors_A + xs_l), optimize=True)
+    elif freq_dim == 3:
+        tmp_wrd = numpy.einsum('wrl,wrm,wrn, dl,dm,dn -> wrd', *(tensors_A + xs_l), optimize=True)
 
     def matvec(x):
         x = x.reshape((D, R))
@@ -207,8 +211,13 @@ def linear_operator_l(N1, N2, tensors_A_masked, tensors_A_pos, x_r, xs_l_masked,
     # x_r               dr
     # xs_l_masked       [dl]
     #   ===> wrd
-    assert len(tensors_A_masked) == 1
-    tmp_wrd1 = numpy.einsum('wrl, dr, dl-> wrd', *(tensors_A_masked + [x_r] + xs_l_masked), optimize=True)
+    freq_dim = len(tensors_A_masked)+1
+    if freq_dim == 2:
+        tmp_wrd1 = numpy.einsum('wrl, dr, dl-> wrd', *(tensors_A_masked + [x_r] + xs_l_masked), optimize=True)
+    elif freq_dim == 3:
+        tmp_wrd1 = numpy.einsum('wrl,wrm, dr, dl,dm-> wrd', *(tensors_A_masked + [x_r] + xs_l_masked), optimize=True)
+    else:
+        raise RuntimeError("freq_dim must be either 2 or 3!")
 
     num_w, R, linear_dim = tensors_A_masked[0].shape
     D = x_r.shape[0]
@@ -250,7 +259,7 @@ def __normalize_tensor(tensor):
     norm = numpy.linalg.norm(tensor)
     return tensor/norm, norm
 
-def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm=1e-8, optimize_alpha=-1, print_interval=20):
+def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0, min_norm=1e-8, optimize_alpha=-1, print_interval=20):
     """
     Alternating least squares
 
@@ -264,11 +273,6 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm
 
     tol_rmse: float
         Stopping condition of optimization. rmse denotes "root mean squared error".
-
-    solver: string ('svd' or 'lsqr')
-        Workhorse for solving a reduced least squares problem.
-        Recommended to use 'svd'.
-        If 'svd' fails to converge, it falls back to 'lsqr'.
 
     verbose: int
         0, 1, 2
@@ -293,8 +297,6 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm
     tensors_A = model.tensors_A
     y = model.y
 
-    num_params = numpy.sum([x.size for x in model.x_tensors()])
-
     def update_r_tensor():
         """
         Build a least squares model for optimizing core tensor
@@ -304,11 +306,10 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm
 
         t2 = time.time()
         A_op = linear_operator_r(num_w*num_o, D*num_rep, tensors_A, model.x_r, model.xs_l, model.x_orb)
-        new_core_tensor = __ridge_complex_lsmr(num_w*num_o, D * num_rep, A_op, y, model.alpha)
+        model.x_r[:,:] = __ridge_complex_lsmr(num_w*num_o, D * num_rep, A_op, y, model.alpha).reshape((D, num_rep))
         t3 = time.time()
         if verbose >= 2:
-            print("core : time ", t2-t1, t3-t2)
-        model.x_r = numpy.reshape(new_core_tensor, [D, num_rep])
+            print("r_tensor : time ", t2-t1, t3-t2)
 
     def update_l_tensor(pos):
         assert pos >= 0
@@ -323,12 +324,10 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm
 
         # At this point, A_lsm is shape of (num_w, num_o, D, Nl)
         t2 = time.time()
-        new_tensor = __ridge_complex_lsmr(num_w*num_o, D*linear_dim, A_op, y, model.alpha)
+        model.xs_l[pos][:,:] = __ridge_complex_lsmr(num_w*num_o, D*linear_dim, A_op, y, model.alpha).reshape((D, linear_dim))
         t3 = time.time()
         if verbose >= 2:
             print("rest : time ", t2-t1, t3-t2)
-
-        model.xs_l[pos] = numpy.reshape(new_tensor, [D, linear_dim])
 
     def update_orb_tensor():
 
@@ -343,8 +342,7 @@ def optimize_als(model, nite, tol_rmse = 1e-5, solver='svd', verbose=0, min_norm
 
         # At this point, A_lsm is shape of (num_w, D)
         for o in range(num_o):
-            new_tensor = __ridge_complex_lsmr(num_w, D, A_lsm, y[:, o], model.alpha)
-            model.x_orb[:, o] = new_tensor
+            model.x_orb[:, o] = __ridge_complex_lsmr(num_w, D, A_lsm, y[:, o], model.alpha)
 
         t3 = time.time()
         if verbose >= 2:
