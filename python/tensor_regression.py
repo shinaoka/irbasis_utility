@@ -10,6 +10,22 @@ from scipy.sparse.linalg import lsmr, LinearOperator
 from itertools import compress, product
 import time
 
+is_enabled_MPI = False
+is_master_node = True
+
+def enable_MPI():
+    global is_enabled_MPI
+    global MPI
+    global comm
+    global is_master_node
+    is_enabled_MPI = True
+    print("Enabling MPI in tensor regression")
+    _temp = __import__('mpi4py', globals(), locals(), ['MPI'], 0)
+    MPI = _temp.MPI
+    comm = MPI.COMM_WORLD
+    is_master_node = comm.Get_rank() == 0
+
+
 def squared_L2_norm(x):
     """
     Squared L2 norm
@@ -109,6 +125,11 @@ class OvercompleteGFModel(object):
         self.x_r = create_tensor(D, num_rep)
         self.xs_l = [create_tensor(D, linear_dim) for i in range(freq_dim)]
         self.x_orb = numpy.random.rand(D, num_o) + 1J * numpy.random.rand(D, num_o)
+
+        if is_enabled_MPI:
+            self.x_r = comm.bcast(self.x_r, root=0)
+            self.xs_l = comm.bcast(self.xs_l, root=0)
+            self.x_orb = comm.bcast(self.x_orb, root=0)
 
     def x_tensors(self):
         return [self.x_r] + self.xs_l + [self.x_orb]
@@ -212,16 +233,22 @@ def linear_operator_l(N1, N2, tensors_A_masked, tensors_A_pos, x_r, xs_l_masked,
     # xs_l_masked       [dl]
     #   ===> wrd
     freq_dim = len(tensors_A_masked)+1
+    num_w, R, linear_dim = tensors_A_masked[0].shape
+    D = x_r.shape[0]
+    num_o = x_orb.shape[1]
+
+
+    if is_enabled_MPI:
+        rank = comm.Get_rank()
+        tensors_A_masked = [numpy.array_split(t, comm.size)[rank] for t in tensors_A_masked]
+        tensors_A_pos = numpy.array_split(tensors_A_pos, comm.size)[rank]
+
     if freq_dim == 2:
         tmp_wrd1 = numpy.einsum('wrl, dr, dl-> wrd', *(tensors_A_masked + [x_r] + xs_l_masked), optimize=True)
     elif freq_dim == 3:
         tmp_wrd1 = numpy.einsum('wrl,wrm, dr, dl,dm-> wrd', *(tensors_A_masked + [x_r] + xs_l_masked), optimize=True)
     else:
         raise RuntimeError("freq_dim must be either 2 or 3!")
-
-    num_w, R, linear_dim = tensors_A_masked[0].shape
-    D = x_r.shape[0]
-    num_o = x_orb.shape[1]
 
     def matvec(x):
         # x                 dn
@@ -231,7 +258,11 @@ def linear_operator_l(N1, N2, tensors_A_masked, tensors_A_pos, x_r, xs_l_masked,
         x = x.reshape((D, linear_dim))
         tmp_wrd2 = numpy.einsum('dn, wrn -> wrd', x, tensors_A_pos, optimize=True)
         tmp_wd = numpy.einsum('wrd, wrd -> wd', tmp_wrd1, tmp_wrd2, optimize=True)
-        return numpy.einsum('wd, do -> wo', tmp_wd, x_orb, optimize=True).reshape(-1)
+        tmp_wo = numpy.einsum('wd, do -> wo', tmp_wd, x_orb, optimize=True).reshape(-1)
+        if is_enabled_MPI:
+            return comm.allgather(tmp_wo)
+        else:
+            return tmp_wo
 
     # tmp_wrd1          wrd
     # tensors_A_pos     wrn
@@ -243,7 +274,12 @@ def linear_operator_l(N1, N2, tensors_A_masked, tensors_A_pos, x_r, xs_l_masked,
         #    ===> dno
         # x_orb             do
         #    ===> dn
-        tmp_dno = numpy.einsum('wdn, wo -> dno', tmp_wdn, y.reshape((num_w, num_o)), optimize=True)
+        y = y.reshape((num_w, num_o))
+        if is_enabled_MPI:
+            tmp_dno = numpy.einsum('wdn, wo -> dno', tmp_wdn, numpy.array_split(y, comm.size)[rank], optimize=True)
+            tmp_dno = comm.allreduce(tmp_dno)
+        else:
+            tmp_dno = numpy.einsum('wdn, wo -> dno', tmp_wdn, y, optimize=True)
         return numpy.einsum('dno, do -> dn', tmp_dno, numpy.conj(x_orb), optimize=True).reshape(-1)
 
     return LinearOperator((N1, N2), matvec=matvec, rmatvec=rmatvec)
@@ -367,17 +403,18 @@ def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0, min_norm=1e-8, optimiz
 
         t4 = time.time()
 
-        #print(t2-t1, t3-t2, t4-t3)
+        if is_master_node:
+            print(t2-t1, t3-t2, t4-t3)
 
         #print("epoch = ", epoch, " loss = ", model.loss(), numpy.sqrt(model.mse()))
         if epoch%print_interval == 0:
             loss = model.loss()
             losss.append(loss)
             rmses.append(numpy.sqrt(model.mse()))
-            if verbose > 0:
+            if verbose > 0 and is_master_node:
                 print("epoch = ", epoch, " loss = ", losss[-1], " rmse = ", rmses[-1], " alpha = ", model.alpha)
-                for i, x in enumerate(model.x_tensors()):
-                    print("norm of x ", i, numpy.linalg.norm(x))
+                #for i, x in enumerate(model.x_tensors()):
+                    #print("norm of x ", i, numpy.linalg.norm(x))
 
         if len(rmses) > 2:
             diff_rmse = numpy.abs(rmses[-2] - rmses[-1])
