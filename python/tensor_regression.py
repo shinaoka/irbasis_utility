@@ -9,21 +9,18 @@ from scipy.sparse.linalg import lsmr, LinearOperator
 
 from itertools import compress, product
 import time
+from mpi4py import MPI
 
 is_enabled_MPI = False
-is_master_node = True
 
 def enable_MPI():
     global is_enabled_MPI
     global MPI
-    global comm
-    global is_master_node
+
     is_enabled_MPI = True
     print("Enabling MPI in tensor regression")
     _temp = __import__('mpi4py', globals(), locals(), ['MPI'], 0)
     MPI = _temp.MPI
-    comm = MPI.COMM_WORLD
-    is_master_node = comm.Get_rank() == 0
 
 def mpi_split(work_size, comm_size):
     base = work_size // comm_size
@@ -129,19 +126,12 @@ class OvercompleteGFModel(object):
         assert self.freq_dim == 2 or self.freq_dim == 3
         self.D = D
 
-    
         def create_tensor(N, M):
-            rand = numpy.random.rand(N, M) + 1J * numpy.random.rand(N, M)
-            return rand
-    
+            return numpy.zeros((N, M), dtype=complex)
+
         self.x_r = create_tensor(D, num_rep)
         self.xs_l = [create_tensor(D, linear_dim) for i in range(freq_dim)]
-        self.x_orb = numpy.random.rand(D, num_o) + 1J * numpy.random.rand(D, num_o)
-
-        if is_enabled_MPI:
-            self.x_r = comm.bcast(self.x_r, root=0)
-            self.xs_l = comm.bcast(self.xs_l, root=0)
-            self.x_orb = comm.bcast(self.x_orb, root=0)
+        self.x_orb = create_tensor(D, num_o)
 
     def x_tensors(self):
         return [self.x_r] + self.xs_l + [self.x_orb]
@@ -206,16 +196,24 @@ class OvercompleteGFModel(object):
 
         return self.alpha
 
-    def mse(self, x_tensors=None):
+    def se(self, x_tensors=None):
         """
-        Compute mean squared error
+        Compute squared error
         """
         if x_tensors is None:
             x_tensors = self.x_tensors()
 
         y_pre = self.predict_y(x_tensors)
         assert self.y.shape == y_pre.shape
-        return (squared_L2_norm(self.y - y_pre))/y_pre.size
+
+        return squared_L2_norm(self.y - y_pre)
+
+    def mse(self, x_tensors=None):
+        """
+        Compute mean squared error
+        """
+
+        return self.se(x_tensors)/self.y.size
 
 def linear_operator_r(N1, N2, tensors_A, x_r, xs_l, x_orb):
     num_w, R, linear_dim = tensors_A[0].shape
@@ -249,17 +247,6 @@ def linear_operator_l(N1, N2, tensors_A_masked, tensors_A_pos, x_r, xs_l_masked,
     D = x_r.shape[0]
     num_o = x_orb.shape[1]
 
-
-    if is_enabled_MPI:
-        sizes, offsets = mpi_split(num_w, comm.size)
-        rank = comm.Get_rank()
-        start, end = offsets[rank], offsets[rank] + sizes[rank]
-
-        #print("split ", sizes, offsets, start, end)
-        tensors_A_masked = [t[start:end, :, :] for t in tensors_A_masked]
-        tensors_A_pos = tensors_A_pos[start:end, :, :]
-
-
     if freq_dim == 2:
         tmp_wrd1 = numpy.einsum('wrl, dr, dl-> wrd', *(tensors_A_masked + [x_r] + xs_l_masked), optimize=True)
     elif freq_dim == 3:
@@ -276,12 +263,7 @@ def linear_operator_l(N1, N2, tensors_A_masked, tensors_A_pos, x_r, xs_l_masked,
         tmp_wrd2 = numpy.einsum('dn, wrn -> wrd', x, tensors_A_pos, optimize=True)
         tmp_wd = numpy.einsum('wrd, wrd -> wd', tmp_wrd1, tmp_wrd2, optimize=True)
         tmp_wo = numpy.einsum('wd, do -> wo', tmp_wd, x_orb, optimize=True).reshape(-1)
-        if is_enabled_MPI:
-            tmp_wo_all = numpy.empty(num_w * num_o, dtype=complex)
-            comm.Allgatherv(tmp_wo.ravel(), [tmp_wo_all, sizes * num_o, offsets * num_o, MPI.DOUBLE_COMPLEX])
-            return tmp_wo_all
-        else:
-            return tmp_wo
+        return tmp_wo
 
     # tmp_wrd1          wrd
     # tensors_A_pos     wrn
@@ -294,15 +276,7 @@ def linear_operator_l(N1, N2, tensors_A_masked, tensors_A_pos, x_r, xs_l_masked,
         # x_orb             do
         #    ===> dn
         y = y.reshape((num_w, num_o))
-        if is_enabled_MPI:
-            tmp_dno_local = numpy.einsum('wdn, wo -> dno', tmp_wdn, y[start:end, :], optimize=True)
-            tmp_dno = numpy.zeros(tmp_dno_local.size, dtype=complex)
-            comm.Allreduce([tmp_dno_local.ravel(), MPI.DOUBLE_COMPLEX], [tmp_dno, MPI.DOUBLE_COMPLEX], op=MPI.SUM)
-            #print("local ", rank, numpy.sum(tmp_dno_local))
-            tmp_dno = tmp_dno.reshape(tmp_dno_local.shape)
-            #print("sum ", rank, numpy.sum(tmp_dno))
-        else:
-            tmp_dno = numpy.einsum('wdn, wo -> dno', tmp_wdn, y, optimize=True)
+        tmp_dno = numpy.einsum('wdn, wo -> dno', tmp_wdn, y, optimize=True)
         return numpy.einsum('dno, do -> dn', tmp_dno, numpy.conj(x_orb), optimize=True).reshape(-1)
 
     return LinearOperator((N1, N2), matvec=matvec, rmatvec=rmatvec)
@@ -318,7 +292,7 @@ def __normalize_tensor(tensor):
     norm = numpy.linalg.norm(tensor)
     return tensor/norm, norm
 
-def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0, min_norm=1e-8, optimize_alpha=-1, print_interval=20):
+def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0, optimize_alpha=-1, print_interval=20, comm=None):
     """
     Alternating least squares
 
@@ -347,6 +321,14 @@ def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0, min_norm=1e-8, optimiz
     -------
 
     """
+
+    rank = 0
+    if comm is None and is_enabled_MPI:
+        comm = MPI.COMM_WORLD
+
+    if is_enabled_MPI:
+        rank = comm.Get_rank()
+
     num_rep = model.num_rep
     D = model.D
     num_w = model.num_w
@@ -407,10 +389,20 @@ def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0, min_norm=1e-8, optimiz
         if verbose >= 2:
             print("rest : time ", t2-t1, t3-t2)
 
+    model.x_r = numpy.random.rand(*model.x_r.shape) + 1J * numpy.random.rand(*model.x_r.shape)
+    for i in range(len(model.xs_l)):
+        model.xs_l[i] = numpy.random.rand(*model.xs_l[i].shape) + 1J*numpy.random.rand(*model.xs_l[i].shape)
+    model.x_orb = numpy.random.rand(*model.x_orb.shape) + 1J* numpy.random.rand(*model.x_orb.shape)
+
+    if is_enabled_MPI:
+        model.x_r = comm.bcast(model.x_r, root=0)
+        for i in range(len(model.xs_l)):
+            model.xs_l[i] = comm.bcast(model.xs_l[i], root=0)
+        model.x_orb = comm.bcast(model.x_orb, root=0)
+
     losss = []
-    epochs = range(nite)
     rmses = []
-    for epoch in epochs:
+    for epoch in range(nite):
         # Optimize r tensor
         t1 = time.time()
         update_r_tensor()
@@ -426,18 +418,19 @@ def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0, min_norm=1e-8, optimiz
 
         t4 = time.time()
 
-        if is_master_node:
+        if rank == 0:
             print(t2-t1, t3-t2, t4-t3)
 
-        #print("epoch = ", epoch, " loss = ", model.loss(), numpy.sqrt(model.mse()))
         if epoch%print_interval == 0:
-            loss = model.loss()
-            losss.append(loss)
-            rmses.append(numpy.sqrt(model.mse()))
-            if verbose > 0 and is_master_node:
+            if is_enabled_MPI:
+                mse = comm.allreduce(model.se())/comm.allreduce(num_w)
+                losss.append(comm.allreduce(model.loss()))
+            else:
+                mse = model.mse()
+                losss.append(model.loss())
+            rmses.append(numpy.sqrt(mse))
+            if verbose > 0 and rank == 0:
                 print("epoch = ", epoch, " loss = ", losss[-1], " rmse = ", rmses[-1], " alpha = ", model.alpha)
-                #for i, x in enumerate(model.x_tensors()):
-                    #print("norm of x ", i, numpy.linalg.norm(x))
 
         if len(rmses) > 2:
             diff_rmse = numpy.abs(rmses[-2] - rmses[-1])
