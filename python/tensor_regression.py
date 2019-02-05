@@ -422,7 +422,7 @@ def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0, optimize_alpha=-1, pri
 
         if epoch%print_interval == 0:
             if is_enabled_MPI:
-                mse = comm.allreduce(model.se())/comm.allreduce(num_w)
+                mse = comm.allreduce(model.se())/(comm.allreduce(num_w) * num_o)
                 losss.append(comm.allreduce(model.loss()))
             else:
                 mse = model.mse()

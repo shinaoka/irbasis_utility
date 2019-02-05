@@ -12,7 +12,7 @@ from irbasis_util.regression import *
 from irbasis_util.tensor_regression import *
 from mpi4py import MPI 
 
-#enable_MPI() #for tensor_regression
+enable_MPI() #for tensor_regression
 
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
