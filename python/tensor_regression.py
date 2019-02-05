@@ -5,7 +5,8 @@ from .regression import ridge_complex
 import numpy
 import scipy
 from scipy.linalg import LinAlgError
-from scipy.sparse.linalg import lsmr, LinearOperator
+from scipy.sparse.linalg import LinearOperator
+from .lsqr import lsqr
 
 from itertools import compress, product
 import time
@@ -281,18 +282,15 @@ def linear_operator_l(N1, N2, tensors_A_masked, tensors_A_pos, x_r, xs_l_masked,
 
     return LinearOperator((N1, N2), matvec=matvec, rmatvec=rmatvec)
 
-def __ridge_complex_lsmr(N1, N2, A, y, alpha, num_data=1, verbose=0):
-    if isinstance(A, numpy.ndarray):
-        r = lsmr(A.reshape((N1,N2)), y.reshape((N1, num_data)), damp=numpy.sqrt(alpha))
-    else:
-        r = lsmr(A, y.reshape((N1, num_data)), damp=numpy.sqrt(alpha))
+def __ridge_complex_lsqr(N1, N2, A, y, alpha, num_data=1, verbose=0):
+    r = lsqr(A, y.reshape((N1, num_data)), damp=numpy.sqrt(alpha))
     return r[0]
 
 def __normalize_tensor(tensor):
     norm = numpy.linalg.norm(tensor)
     return tensor/norm, norm
 
-def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0, optimize_alpha=-1, print_interval=20, comm=None):
+def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0, optimize_alpha=-1, print_interval=20, comm=None, seed=1):
     """
     Alternating least squares
 
@@ -347,7 +345,7 @@ def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0, optimize_alpha=-1, pri
 
         t2 = time.time()
         A_op = linear_operator_r(num_w*num_o, D*num_rep, tensors_A, model.x_r, model.xs_l, model.x_orb)
-        model.x_r[:,:] = __ridge_complex_lsmr(num_w*num_o, D * num_rep, A_op, y, model.alpha).reshape((D, num_rep))
+        model.x_r[:,:] = __ridge_complex_lsqr(num_w*num_o, D * num_rep, A_op, y, model.alpha).reshape((D, num_rep))
         t3 = time.time()
         if verbose >= 2:
             print("r_tensor : time ", t2-t1, t3-t2)
@@ -365,7 +363,7 @@ def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0, optimize_alpha=-1, pri
 
         # At this point, A_lsm is shape of (num_w, num_o, D, Nl)
         t2 = time.time()
-        model.xs_l[pos][:,:] = __ridge_complex_lsmr(num_w*num_o, D*linear_dim, A_op, y, model.alpha).reshape((D, linear_dim))
+        model.xs_l[pos][:,:] = __ridge_complex_lsqr(num_w*num_o, D*linear_dim, A_op, y, model.alpha).reshape((D, linear_dim))
         t3 = time.time()
         if verbose >= 2:
             print("rest : time ", t2-t1, t3-t2)
@@ -383,12 +381,13 @@ def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0, optimize_alpha=-1, pri
 
         # At this point, A_lsm is shape of (num_w, D)
         for o in range(num_o):
-            model.x_orb[:, o] = __ridge_complex_lsmr(num_w, D, A_lsm, y[:, o], model.alpha)
+            model.x_orb[:, o] = __ridge_complex_lsqr(num_w, D, A_lsm, y[:, o], model.alpha)
 
         t3 = time.time()
         if verbose >= 2:
             print("rest : time ", t2-t1, t3-t2)
 
+    numpy.random.seed(seed)
     model.x_r = numpy.random.rand(*model.x_r.shape) + 1J * numpy.random.rand(*model.x_r.shape)
     for i in range(len(model.xs_l)):
         model.xs_l[i] = numpy.random.rand(*model.xs_l[i].shape) + 1J*numpy.random.rand(*model.xs_l[i].shape)

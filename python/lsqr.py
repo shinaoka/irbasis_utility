@@ -158,7 +158,7 @@ def lsqr(A, b, damp=0.0, atol=1e-8, btol=1e-8, conlim=1e8,
     sn2 = 0
 
     def norm_allreduce(vec):
-        return sqrt(comm.allreduce(np.dot(vec,vec)))
+        return sqrt(comm.allreduce(np.dot(vec.conjugate(),vec).real))
 
     """
     Set up the first vectors u and v for the bidiagonalization.
