@@ -41,45 +41,24 @@ parser.add_argument('path_output_file', action='store', default=None, type=str, 
 parser.add_argument('--bfreq', default=0, type=int, help='Bosonic frequnecy')
 parser.add_argument('--niter', default=20, type=int, help='Number of iterations')
 parser.add_argument('--D', default=1, type=int, help='Rank of decomposition')
+parser.add_argument('--Lambda', default=0, type=float, help='Lambda')
+parser.add_argument('--beta', default=0, type=float, help='beta')
 
 args = parser.parse_args()
 if os.path.isfile(args.path_input_file) is False:
     print("Input file is not exist.")
     sys.exit(-1)
 boson_freq = args.bfreq
-print("boson_freq", boson_freq)
+
+beta = args.beta
+Lambda = args.Lambda
 
 with h5py.File(args.path_input_file, 'r') as hf:
-    G1_IR = hf["G1_IR"].value[:,:,:,0] + 1J * hf["G1_IR"].value[:,:,:,1]
-    Lambda = hf["/parameters/measurement.Lambda"].value
-    beta = hf["/parameters/model.beta"].value
-    nflavors = hf["/parameters/model.sites"].value * hf["/parameters/model.spins"].value
-
     data = hf['/G2/matsubara/data'].value[:,:,:,:,:,0] + 1J * hf['/G2/matsubara/data'].value[:,:,:,:,:,1]
-    data = data.reshape((nflavors,nflavors,nflavors,nflavors,-1))
+    nflavors = data.shape[0]
     freqs_PH_all = hf['/G2/matsubara/freqs_PH'].value
 
-Nl = G1_IR.shape[2]
-
 basis = irbasis.load('F', Lambda)
-
-if is_master_node:
-    plt.figure(1)
-    plt.plot(numpy.abs(G1_IR[0,0,:]), marker='o')
-    plt.grid()
-    plt.yscale("log")
-    plt.savefig("G1IR.pdf")
-    plt.close()
-
-    plt.figure(1)
-    min_n = -100
-    max_n = 100
-    Unl = (numpy.sqrt(beta) * basis.compute_unl(numpy.arange(min_n, max_n+1)))[:,0:Nl]
-    Giw = numpy.dot(Unl, G1_IR[0,0,:])
-    n = numpy.arange(min_n, max_n+1)
-    plt.plot(n, Giw.imag, marker='x')
-    plt.savefig("Giwn.pdf")
-    plt.close()
 
 n_freqs = numpy.sum([freqs_PH_all[i,2]==boson_freq for i in range(freqs_PH_all.shape[0])])
 
@@ -99,11 +78,11 @@ G2iwn_dict = {}
 for i in range(n_freqs):
     G2iwn_dict[(freqs_PH[i,0],freqs_PH[i,1])] = G2iwn[:,:,:,:,i]
 
-if is_master_node:
-    plt.figure(1)
-    plt.plot(freqs_PH[:,0], freqs_PH[:,1], ls='', marker='o')
-    plt.savefig("freqs_PH.pdf")
-    plt.close()
+#if is_master_node:
+    #plt.figure(1)
+    #plt.plot(freqs_PH[:,0], freqs_PH[:,1], ls='', marker='o')
+    #plt.savefig("freqs_PH.pdf")
+    #plt.close()
 
 wmax = Lambda / beta
 
@@ -136,9 +115,7 @@ def kruskal_complex_Ds(tensors_A, y, Ds):
     print(Nw, Nr, linear_dim)
     alpha_init = 0
     for i, D in enumerate(Ds):
-        print("D ", D, y.shape)
-        #print("debugA", y)
-        #print("debugB", tensors_A)
+        print("D ", D)
         model = OvercompleteGFModel(Nw, Nr, 2, nflavors**4, linear_dim, tensors_A, y.reshape((-1,nflavors**4)),
                                     alpha_init, D)
         info = optimize_als(model, args.niter, tol_rmse = 1e-6,
@@ -159,6 +136,7 @@ def construct_prj(sp):
     prj = phb.projector_to_matsubara_vec(sp, decomposed_form=True)
     for i in range(2):
         prj[i] = prj[i].reshape((n_sp, 12, Nl))
+        
     return prj
 
 prj = construct_prj(sp_local)
@@ -167,18 +145,18 @@ Ds = [args.D]
 y = G2iwn_local.transpose((-1,0,1,2,3))
 coeffs_D, se_D, model_D = kruskal_complex_Ds(prj, y, Ds)
 
-with h5py.File(args.path_output_file, 'a') as hf:
-    for i, D in enumerate(Ds):
-        if '/D'+ str(D) in hf:
-            del hf['/D'+ str(D)]
-        hf['/D'+ str(D)] = coeffs_D[i]
-
 if is_master_node:
-    plt.figure(1)
-    up, down = 0, 1
-    y_predict = model_D[-1].predict_y().reshape((-1,nflavors,nflavors,nflavors,nflavors))
-    plt.plot(numpy.abs(y[:,up,up,down,down]), c='r', ls='', marker='x')
-    plt.plot(numpy.abs(y_predict[:,up,up,down,down]), c='r')
-    plt.yscale("log")
-    plt.xlim([0,100])
-    plt.savefig("fit.pdf")
+    with h5py.File(args.path_output_file, 'a') as hf:
+        for i, D in enumerate(Ds):
+            if '/D'+ str(D) in hf:
+                del hf['/D'+ str(D)]
+            hf['/D'+ str(D)] = coeffs_D[i]
+
+    #plt.figure(1)
+    #up, down = 0, 1
+    #y_predict = model_D[-1].predict_y().reshape((-1,nflavors,nflavors,nflavors,nflavors))
+    #plt.plot(numpy.abs(y[:,up,up,down,down]), c='r', ls='', marker='x')
+    #plt.plot(numpy.abs(y_predict[:,up,up,down,down]), c='r')
+    #plt.yscale("log")
+    #plt.xlim([0,100])
+    #plt.savefig("fit.pdf")

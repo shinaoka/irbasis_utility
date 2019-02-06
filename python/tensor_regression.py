@@ -2,6 +2,7 @@ from __future__ import print_function
 
 from .regression import ridge_complex
 
+import sys
 import numpy
 import scipy
 from scipy.linalg import LinAlgError
@@ -402,6 +403,8 @@ def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0, optimize_alpha=-1, pri
     losss = []
     rmses = []
     for epoch in range(nite):
+        sys.stdout.flush()
+
         # Optimize r tensor
         t1 = time.time()
         update_r_tensor()
@@ -438,6 +441,8 @@ def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0, optimize_alpha=-1, pri
 
         if optimize_alpha > 0:
             model.update_alpha(optimize_alpha)
+
+        sys.stdout.flush()
 
     info = {}
     info['losss'] = losss

@@ -196,7 +196,7 @@ def lsqr(A, b, damp=0.0, atol=1e-8, btol=1e-8, conlim=1e8,
     # there was an error on return when arnorm==0
     arnorm = alfa * beta
     if arnorm == 0:
-        print(msg[0])
+        #print(msg[0])
         return x, istop, itn, r1norm, r2norm, anorm, acond, arnorm, xnorm, var
 
     head1 = '   Itn      x[0]       r1norm     r2norm '
@@ -385,7 +385,7 @@ if __name__ == '__main__':
 
     n1 = 1000
     N1, N2 = n1 * size, 10
-    damp = 0.0
+    damp = 0.1
 
     A_pile = [np.random.randn(n1, N2) for r in range(size)]
     y_pile = [np.random.randn(n1) for r in range(size)]
