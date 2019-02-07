@@ -291,8 +291,8 @@ def linear_operator_l(N1, N2, tensors_A_masked, tensors_A_pos, x_r, xs_l_masked,
 
     return LinearOperator((N1, N2), matvec=matvec, rmatvec=rmatvec)
 
-def __ridge_complex_lsqr(N1, N2, A, y, alpha, num_data=1, verbose=0):
-    r = lsqr(A, y.reshape((N1, num_data)), damp=numpy.sqrt(alpha))
+def __ridge_complex_lsqr(N1, N2, A, y, alpha, num_data=1, verbose=0, x0=None):
+    r = lsqr(A, y.reshape((N1, num_data)), damp=numpy.sqrt(alpha), x0=x0)
     return r[0]
 
 def __normalize_tensor(tensor):
@@ -372,7 +372,7 @@ def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0, optimize_alpha=-1, pri
 
         # At this point, A_lsm is shape of (num_w, num_o, D, Nl)
         t2 = time.time()
-        model.xs_l[pos][:,:] = __ridge_complex_lsqr(num_w*num_o, D*linear_dim, A_op, y, model.alpha).reshape((D, linear_dim))
+        model.xs_l[pos][:,:] = __ridge_complex_lsqr(num_w*num_o, D*linear_dim, A_op, y, model.alpha, x0=model.xs_l[pos].ravel()).reshape((D, linear_dim))
         t3 = time.time()
         if verbose >= 2:
             print("rest : time ", t2-t1, t3-t2)
