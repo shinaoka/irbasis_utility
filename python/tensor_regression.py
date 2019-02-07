@@ -183,7 +183,16 @@ class OvercompleteGFModel(object):
             r += self.alpha * squared_L2_norm(t)
         return r
 
-    def update_alpha(self, target_ratio=1e-8):
+    def squared_norm(self, x_tensors=None):
+        """
+        Compute mean squared error + L2 regularization term
+        """
+        if x_tensors is None:
+            x_tensors = self.x_tensors()
+
+        return numpy.sum([squared_L2_norm(t) for t in x_tensors])
+
+    def update_alpha(self, squared_error, target_ratio=1e-8):
         """
         Update alpha so that L2 regularization term/residual term ~ target_ratio
         """
@@ -191,10 +200,9 @@ class OvercompleteGFModel(object):
 
         y_pre = self.predict_y(x_tensors)
 
-        res = squared_L2_norm(self.y - y_pre)
         reg = numpy.sum([squared_L2_norm(t) for t in x_tensors])
 
-        self.alpha = target_ratio * res/reg
+        self.alpha = target_ratio * squared_error/reg
 
         return self.alpha
 
@@ -425,12 +433,16 @@ def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0, optimize_alpha=-1, pri
 
         if epoch%print_interval == 0:
             if is_enabled_MPI:
-                mse = comm.allreduce(model.se())/(comm.allreduce(num_w) * num_o)
-                losss.append(comm.allreduce(model.loss()))
+                se = comm.allreduce(model.se())
+                snorm = comm.allreduce(model.squared_norm())
             else:
-                mse = model.mse()
-                losss.append(model.loss())
+                se = model.se()
+                snorm = model.squared_norm()
+
+            mse = se/(comm.allreduce(num_w) * num_o)
             rmses.append(numpy.sqrt(mse))
+            losss.append(se + model.alpha * snorm)
+
             if verbose > 0 and rank == 0:
                 print("epoch = ", epoch, " loss = ", losss[-1], " rmse = ", rmses[-1], " alpha = ", model.alpha)
 
@@ -440,7 +452,8 @@ def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0, optimize_alpha=-1, pri
                 break
 
         if optimize_alpha > 0:
-            model.update_alpha(optimize_alpha)
+            se = comm.allreduce(model.se())
+            model.update_alpha(se, optimize_alpha)
 
         sys.stdout.flush()
 

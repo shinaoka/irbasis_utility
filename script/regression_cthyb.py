@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 import numpy
 import sys
 from itertools import *
@@ -11,6 +13,9 @@ from irbasis_util.regression import *
 
 from irbasis_util.tensor_regression import *
 from mpi4py import MPI 
+
+import warnings
+warnings.filterwarnings("ignore",category=DeprecationWarning)
 
 enable_MPI() #for tensor_regression
 
@@ -112,19 +117,18 @@ def kruskal_complex_Ds(tensors_A, y, Ds):
     squared_errors_D = []
     model_D = []
     Nw, Nr, linear_dim = tensors_A[0].shape
-    print(Nw, Nr, linear_dim)
     alpha_init = 0
     for i, D in enumerate(Ds):
-        print("D ", D)
+        if rank == 0:
+            print("D ", D)
         model = OvercompleteGFModel(Nw, Nr, 2, nflavors**4, linear_dim, tensors_A, y.reshape((-1,nflavors**4)),
                                     alpha_init, D)
         info = optimize_als(model, args.niter, tol_rmse = 1e-6,
                             optimize_alpha=1e-8, verbose = 1, print_interval=1)
         coeffs = model.full_tensor_x()
         coeffs_D.append(coeffs)
-        e = model.mse()
-        print("D = ", D, e, " num_ite", len(info['losss']))
-        squared_errors_D.append(e)
+        #print("D = ", D, e, " num_ite", len(info['losss']))
+        squared_errors_D.append(info['rmses'][-1]**2)
         model_D.append(model)
     
     squared_errors_D = numpy.array(squared_errors_D)
