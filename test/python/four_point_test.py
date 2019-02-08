@@ -109,6 +109,10 @@ class TestMethods(unittest.TestCase):
             coeffs = ridge_complex(prj_mat, Giwn, alpha).reshape((16, Nl, Nl, Nl))
             Giwn_check = numpy.dot(prj_check.reshape((len(n1234_check), 16 * Nl**3)), (coeffs).reshape((16 * Nl**3)))
             self.assertLessEqual(numpy.amax(numpy.abs(Giwn_check - Giwn_check_ref)), 1e-2)
+        
+    def test_transformation_to_PH(self):
+        self.assertEqual(to_PH_convention(from_PH_convention( (0,1,2) )),  (0,1,2))
+
 
 if __name__ == '__main__':
     unittest.main()

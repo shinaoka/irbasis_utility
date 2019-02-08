@@ -164,3 +164,19 @@ class FourPoint(object):
 
     def _get_Unl_b(self, n):
         return self._Bb.compute_Unl([n])[:,0:self._Nl].reshape((self._Nl))
+
+def to_PH_convention(n1n2n3n4):
+    """
+    To particle-hole convention
+    """
+    n = -n1n2n3n4[1]-1
+    np = n1n2n3n4[2]
+    m = n1n2n3n4[0] + n1n2n3n4[1] + 1
+    return (n, np, m)
+
+def from_PH_convention(n_np_m):
+    """
+    To particle-hole convention
+    """
+    n, np, m = n_np_m
+    return (n+m, -n-1, np, -np-1-m)
