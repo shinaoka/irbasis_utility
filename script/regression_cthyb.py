@@ -1,9 +1,13 @@
 from __future__ import print_function
 
+import warnings
+warnings.filterwarnings("ignore",category=DeprecationWarning)
+
 import numpy
 import sys
 from itertools import *
 import h5py
+import copy
 import argparse
 import irbasis
 import matplotlib.pylab as plt
@@ -14,8 +18,6 @@ from irbasis_util.regression import *
 from irbasis_util.tensor_regression import *
 from mpi4py import MPI 
 
-import warnings
-warnings.filterwarnings("ignore",category=DeprecationWarning)
 
 enable_MPI() #for tensor_regression
 
@@ -63,6 +65,7 @@ with h5py.File(args.path_input_file, 'r') as hf:
     nflavors = data.shape[0]
     freqs_PH_all = hf['/G2/matsubara/freqs_PH'].value
 
+
 basis = irbasis.load('F', Lambda)
 
 n_freqs = numpy.sum([freqs_PH_all[i,2]==boson_freq for i in range(freqs_PH_all.shape[0])])
@@ -73,6 +76,14 @@ if n_freqs == 0:
 idx = freqs_PH_all[:,2] == boson_freq
 freqs_PH = freqs_PH_all[idx,:]
 G2iwn = data[:,:,:,:,idx]
+
+# Find active orbital components
+tmp = numpy.sqrt(numpy.sum(numpy.abs(G2iwn)**2, axis=-1)).ravel()
+orb_idx = tmp/numpy.amax(tmp) > 1e-5
+num_o = nflavors**4
+num_o_nonzero = numpy.sum(orb_idx)
+if rank == 0:
+    print("Num of active orbital components = ", num_o_nonzero)
 
 sizes, offsets = mpi_split(n_freqs, comm.size)
 n_freqs_local = sizes[rank]
@@ -99,7 +110,7 @@ sp_local = numpy.array(sp)[start:end,:]
 sp_local = [(sp_local[i,0], sp_local[i,1]) for i in range(sp_local.shape[0])]
 
 # Regression
-def kruskal_complex_Ds(tensors_A, y, Ds):
+def kruskal_complex_Ds(tensors_A, y, Ds, cutoff=1e-5):
     """
     
     Parameters
@@ -118,16 +129,21 @@ def kruskal_complex_Ds(tensors_A, y, Ds):
     model_D = []
     Nw, Nr, linear_dim = tensors_A[0].shape
     alpha_init = 0
+    y = y.reshape((-1, nflavors**4))
+
+    #for i in range(nflavors**4):
+        #print(i, tmp[i])
     for i, D in enumerate(Ds):
         if rank == 0:
             print("D ", D)
-        model = OvercompleteGFModel(Nw, Nr, 2, nflavors**4, linear_dim, tensors_A, y.reshape((-1,nflavors**4)),
-                                    alpha_init, D)
-        info = optimize_als(model, args.niter, tol_rmse = 1e-6,
-                            optimize_alpha=1e-8, verbose = 1, print_interval=1)
-        coeffs = model.full_tensor_x()
-        coeffs_D.append(coeffs)
-        #print("D = ", D, e, " num_ite", len(info['losss']))
+        model = OvercompleteGFModel(Nw, Nr, 2, num_o_nonzero, linear_dim, tensors_A, y[:, orb_idx], alpha_init, D)
+        info = optimize_als(model, args.niter, tol_rmse = 1e-8, optimize_alpha=1e-8, verbose = 1, print_interval=1)
+        #coeffs = model.full_tensor_x()
+        xs = copy.deepcopy(model.x_tensors())
+        x_orb_full = numpy.zeros((D, num_o), dtype=complex)
+        x_orb_full[:, orb_idx] = xs[-1]
+        xs[-1] = x_orb_full
+        coeffs_D.append(xs)
         squared_errors_D.append(info['rmses'][-1]**2)
         model_D.append(model)
     
@@ -154,7 +170,8 @@ if is_master_node:
         for i, D in enumerate(Ds):
             if '/D'+ str(D) in hf:
                 del hf['/D'+ str(D)]
-            hf['/D'+ str(D)] = coeffs_D[i]
+            for i, x in enumerate(coeffs_D[i]):
+                hf['/D'+ str(D) + '/x' + str(i)] = x
 
     #plt.figure(1)
     #up, down = 0, 1

@@ -163,10 +163,19 @@ class OvercompleteGFModel(object):
         if x_tensors is None:
             x_tensors = self.x_tensors()
 
-        if self.freq_dim == 2:
-            return numpy.einsum('wrl,wrm, dr,dl,dm, do->wo', *(self.tensors_A + x_tensors), optimize=True)
-        elif self.freq_dim == 3:
-            return numpy.einsum('wrl,wrm,wrn, dr,dl,dm,dn, do->wo', *(self.tensors_A + x_tensors), optimize=True)
+        xs_l = x_tensors[1:-1]
+        freq_dim = len(self.tensors_A)
+        if freq_dim == 2:
+            tmp_wrd = numpy.einsum('wrl,wrm, dl,dm -> wrd', *(self.tensors_A + xs_l), optimize=True)
+        elif freq_dim == 3:
+            tmp_wrd = numpy.einsum('wrl,wrm,wrn, dl,dm,dn -> wrd', *(self.tensors_A + xs_l), optimize=True)
+        tmp_wrd = numpy.einsum('wrd, dr->wrd', tmp_wrd, x_tensors[0], optimize=True)
+        return numpy.einsum('wrd, do->wo', tmp_wrd, x_tensors[-1], optimize=True)
+
+        #if self.freq_dim == 2:
+            #return numpy.einsum('wrl,wrm, dr,dl,dm, do->wo', *(self.tensors_A + x_tensors), optimize=True)
+        #elif self.freq_dim == 3:
+            #return numpy.einsum('wrl,wrm,wrn, dr,dl,dm,dn, do->wo', *(self.tensors_A + x_tensors), optimize=True)
 
     def loss(self, x_tensors=None):
         """
@@ -428,9 +437,6 @@ def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0, optimize_alpha=-1, pri
 
         t4 = time.time()
 
-        if rank == 0:
-            print(t2-t1, t3-t2, t4-t3)
-
         if epoch%print_interval == 0:
             if is_enabled_MPI:
                 se = comm.allreduce(model.se())
@@ -454,6 +460,11 @@ def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0, optimize_alpha=-1, pri
         if optimize_alpha > 0:
             se = comm.allreduce(model.se())
             model.update_alpha(se, optimize_alpha)
+
+        t5 = time.time()
+
+        if rank == 0:
+            print(t2-t1, t3-t2, t4-t3, t5-t4)
 
         sys.stdout.flush()
 
