@@ -441,11 +441,12 @@ def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0, optimize_alpha=-1, pri
             if is_enabled_MPI:
                 se = comm.allreduce(model.se())
                 snorm = comm.allreduce(model.squared_norm())
+                mse = se/(comm.allreduce(num_w) * num_o)
             else:
                 se = model.se()
                 snorm = model.squared_norm()
+                mse = se/(num_w * num_o)
 
-            mse = se/(comm.allreduce(num_w) * num_o)
             rmses.append(numpy.sqrt(mse))
             losss.append(se + model.alpha * snorm)
 

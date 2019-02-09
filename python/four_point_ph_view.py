@@ -3,7 +3,7 @@ import numpy
 import scipy
 import scipy.linalg
 from irbasis import *
-from itertools import product
+from itertools import product, chain
 from .internal import *
 from .two_point_basis import *
 
@@ -135,7 +135,7 @@ class FourPointPHView(object):
                 M[2, s1, s2, :, :] = self._get_Usol(s1, o2 + sign * o1)[:, None] * self._get_Usol(s2, o1)[None, :]
             return M
 
-    def sampling_points_matsubara(self, whichl):
+    def sampling_points_matsubara(self, whichl, full_freqs=True):
         """
         Return sampling points in two-fermion-frequency convention
         """
@@ -144,16 +144,32 @@ class FourPointPHView(object):
         sp_o = []
         Nf = len(sp_o_f)
         Nb = len(sp_o_b)
+
         for s1, s2 in product(range(2), repeat=2):
-            for i, j in product(range(Nf), repeat=2):
+            if full_freqs:
+                for i, j in product(range(Nf), repeat=2):
+                    # Fermion, Fermion
+                    sp_o.append((sp_o_f[i] - s1 * self._o, sp_o_f[j] - s2 * self._o))
+                for i, j in product(range(Nb), range(Nf)):
+                    # Boson, Fermion
+                    o2 = sp_o_f[j] - s2 * self._o
+                    o1 = sp_o_b[i] - s1 * self._o + _sign(s1) * o2
+                    sp_o.append((o1, o2))
+                    sp_o.append((o2, o1))
+            else:
+                mini_f = [ Nf //2 - 1,  Nf //2]
+                mini_b = [ Nb //2 ]
+
                 # Fermion, Fermion
-                sp_o.append((sp_o_f[i] - s1 * self._o, sp_o_f[j] - s2 * self._o))
-            for i, j in product(range(Nb), range(Nf)):
+                for i, j in chain(product(range(Nf), mini_f), product(mini_f, range(Nf))):
+                    sp_o.append((sp_o_f[i] - s1 * self._o, sp_o_f[j] - s2 * self._o))
+
                 # Boson, Fermion
-                o2 = sp_o_f[j] - s2 * self._o
-                o1 = sp_o_b[i] - s1 * self._o + _sign(s1) * o2
-                sp_o.append((o1, o2))
-                sp_o.append((o2, o1))
+                for i, j in chain(product(range(Nb), mini_f), product(mini_b, range(Nf))):
+                    o2 = sp_o_f[j] - s2 * self._o
+                    o1 = sp_o_b[i] - s1 * self._o + _sign(s1) * o2
+                    sp_o.append((o1, o2))
+                    sp_o.append((o2, o1))
 
         # Remove duplicate elements
         sp_o = sorted(list(set(sp_o)))
