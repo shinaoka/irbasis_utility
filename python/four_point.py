@@ -83,9 +83,9 @@ class FourPoint(object):
             r = [numpy.zeros((nw, 16, self._Nl), dtype=complex) for i in range(3)]
             for n1, n2, n3, n4 in n1_n2_n3_n4_vec:
                 M1, M2, M3 = self.projector_to_matsubara(n1, n2, n3, n4, True)
-                r[0][i, :, :, :, :] = M1
-                r[1][i, :, :, :, :] = M2
-                r[2][i, :, :, :, :] = M3
+                r[0][i, :, :] = M1
+                r[1][i, :, :] = M2
+                r[2][i, :, :] = M3
             return r
         else:
             r = []
