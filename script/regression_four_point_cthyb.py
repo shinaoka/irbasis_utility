@@ -67,8 +67,8 @@ with h5py.File(args.path_input_file, 'r') as hf:
     num_o = data.shape[0]
 
 #debug
-G2iwn = G2iwn[:1, :]
-num_o = 1
+#G2iwn = G2iwn[:1, :]
+#num_o = 1
 
 # n1, n2, n3, n4 convention
 freqs = []

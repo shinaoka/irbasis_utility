@@ -61,7 +61,7 @@ beta = args.beta
 Lambda = args.Lambda
 
 with h5py.File(args.path_input_file, 'r') as hf:
-    freqs_PH_all = hf['/G2/matsubara/freqs_PH'].value
+    freqs_PH_all = hf['/G2/matsubara/freqs_PH'][()]
     nfreqs_all = len(freqs_PH_all)
     data = hf['/G2/matsubara/data'][()].reshape((-1,nfreqs_all,2))
     data = data[:,:,0] + 1J * data[:,:,1]
