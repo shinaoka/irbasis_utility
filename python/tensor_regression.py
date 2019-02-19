@@ -166,7 +166,7 @@ class OvercompleteGFModel(object):
         elif freq_dim == 3:
             tmp_wrd = numpy.einsum('wrl,wrm,wrn, dl,dm,dn -> wrd', *(self.tensors_A + xs_l), optimize=True)
         tmp_wrd = numpy.einsum('wrd, dr->wrd', tmp_wrd, x_tensors[0], optimize=True)
-        return numpy.einsum('wrd, do->wo', tmp_wrd, x_tensors[-1], optimize=True)
+        return numpy.einsum('wrd, do->wo', tmp_wrd, x_tensors[-1], optimize=False) #optmized is disabled to avoid a bug in numpy
 
     def loss(self, x_tensors=None):
         """
