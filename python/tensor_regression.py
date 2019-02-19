@@ -1,15 +1,11 @@
 from __future__ import print_function
 
-from .regression import ridge_complex
-
 import sys
 import numpy
-import scipy
-from scipy.linalg import LinAlgError
 from scipy.sparse.linalg import LinearOperator
 from .lsqr import lsqr
 
-from itertools import compress, product
+from itertools import compress
 import time
 from mpi4py import MPI
 
@@ -172,11 +168,6 @@ class OvercompleteGFModel(object):
         tmp_wrd = numpy.einsum('wrd, dr->wrd', tmp_wrd, x_tensors[0], optimize=True)
         return numpy.einsum('wrd, do->wo', tmp_wrd, x_tensors[-1], optimize=True)
 
-        #if self.freq_dim == 2:
-            #return numpy.einsum('wrl,wrm, dr,dl,dm, do->wo', *(self.tensors_A + x_tensors), optimize=True)
-        #elif self.freq_dim == 3:
-            #return numpy.einsum('wrl,wrm,wrn, dr,dl,dm,dn, do->wo', *(self.tensors_A + x_tensors), optimize=True)
-
     def loss(self, x_tensors=None):
         """
         Compute mean squared error + L2 regularization term
@@ -206,8 +197,6 @@ class OvercompleteGFModel(object):
         Update alpha so that L2 regularization term/residual term ~ target_ratio
         """
         x_tensors = self.x_tensors()
-
-        y_pre = self.predict_y(x_tensors)
 
         reg = numpy.sum([squared_L2_norm(t) for t in x_tensors])
 
@@ -358,15 +347,8 @@ def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0, optimize_alpha=-1, pri
         """
         Build a least squares model for optimizing core tensor
         """
-        t1 = time.time()
-
-
-        t2 = time.time()
         A_op = linear_operator_r(num_w*num_o, D*num_rep, tensors_A, model.x_r, model.xs_l, model.x_orb)
         model.x_r[:,:] = __ridge_complex_lsqr(num_w*num_o, D * num_rep, A_op, y, model.alpha).reshape((D, num_rep))
-        t3 = time.time()
-        if verbose >= 2:
-            print("r_tensor : time ", t2-t1, t3-t2)
 
     def update_l_tensor(pos):
         assert pos >= 0

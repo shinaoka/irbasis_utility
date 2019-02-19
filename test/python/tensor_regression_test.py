@@ -20,23 +20,23 @@ class TestMethods(unittest.TestCase):
 
         Nw = 50
         Nr = 2
-        linear_dim = 2
-        D = 30
-        num_o = 2**4
-        alpha = 0.1
+        linear_dim = 5
+        D = 2
+        num_o = 1**4
+        alpha = 1e-10
 
         def create_tensor_3(N, M, L):
             rand = numpy.random.rand(N, M, L) + 1J * numpy.random.rand(N, M, L)
             return rand
 
-        for freq_dim in [2, 3]:
+        for freq_dim in [2,3]:
             tensors_A = [create_tensor_3(Nw, Nr, linear_dim) for i in range(freq_dim)]
             y = numpy.random.randn(Nw, num_o) +\
                 1J * numpy.random.randn(Nw, num_o)
 
             numpy.random.seed(100)
             model = OvercompleteGFModel(Nw, Nr, freq_dim, num_o, linear_dim, tensors_A, y, alpha, D)
-            info = optimize_als(model, nite = 400, tol_rmse=1e-10, verbose=0)
+            info = optimize_als(model, nite = 400, tol_rmse=1e-10, verbose=1)
 
             self.assertLess(numpy.abs(info['losss'][-1] - info['losss'][-2])/numpy.abs(info['losss'][-2]), 1e-3)
 
