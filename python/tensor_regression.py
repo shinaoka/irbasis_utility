@@ -7,7 +7,6 @@ from .lsqr import lsqr
 
 from itertools import compress
 import time
-from mpi4py import MPI
 
 is_enabled_MPI = False
 
@@ -309,6 +308,10 @@ def linear_operator_l(N1, N2, tensors_A_masked, tensors_A_pos, x_r, xs_l_masked,
     return LinearOperator((N1, N2), matvec=matvec, rmatvec=rmatvec)
 
 def __ridge_complex_lsqr(N1, N2, A, y, alpha, num_data=1, verbose=0, x0=None):
+    if is_enabled_MPI:
+        from .lsqr import lsqr
+    else:
+        from scipy.sparse.linalg import lsqr
     r = lsqr(A, y.reshape((N1, num_data)), damp=numpy.sqrt(alpha), x0=x0)
     return r[0]
 
