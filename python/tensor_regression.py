@@ -3,7 +3,6 @@ from __future__ import print_function
 import sys
 import numpy
 from scipy.sparse.linalg import LinearOperator
-from .lsqr import lsqr
 
 from itertools import compress
 import time
@@ -15,7 +14,6 @@ def enable_MPI():
     global MPI
 
     is_enabled_MPI = True
-    print("Enabling MPI in tensor regression")
     _temp = __import__('mpi4py', globals(), locals(), ['MPI'], 0)
     MPI = _temp.MPI
 
