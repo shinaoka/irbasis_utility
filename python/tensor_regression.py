@@ -60,6 +60,23 @@ def cp_to_full_tensor(x_tensors):
     full_tensor = numpy.sum(numpy.reshape(tildeT, (D,) + tuple(dims)), axis=0)
     return full_tensor
 
+def predict(prj, x_tensors):
+    xs_l = x_tensors[1:-1]
+    freq_dim = len(prj)
+    t1 = time.time()
+    nw, R, D = prj[0].shape[0], prj[0].shape[1], xs_l[0].shape[0]
+    num_o = x_tensors[-1].shape[1]
+
+    tmp_wrd = numpy.full((nw, R, D), complex(1.0))
+    for i in range(freq_dim):
+        tmp_wrd *= numpy.einsum('wrl, dl -> wrd', prj[i], xs_l[i], optimize=True)
+    t2 = time.time()
+    tmp_wd = numpy.einsum('wrd, dr->wd', tmp_wrd, x_tensors[0], optimize=True)
+    t3 = time.time()
+    tmp_wo = numpy.einsum('wd, do->wo', tmp_wd, x_tensors[-1], optimize=True).reshape((nw, num_o))
+    t4 = time.time()
+    #print(t2-t1, t3-t2, t4-t3)
+    return tmp_wo
 
 class OvercompleteGFModel(object):
     """
@@ -159,14 +176,15 @@ class OvercompleteGFModel(object):
         if x_tensors is None:
             x_tensors = self.x_tensors()
 
-        xs_l = x_tensors[1:-1]
-        freq_dim = len(self.tensors_A)
-        if freq_dim == 2:
-            tmp_wrd = numpy.einsum('wrl,wrm, dl,dm -> wrd', *(self.tensors_A + xs_l), optimize=True)
-        elif freq_dim == 3:
-            tmp_wrd = numpy.einsum('wrl,wrm,wrn, dl,dm,dn -> wrd', *(self.tensors_A + xs_l), optimize=True)
-        tmp_wrd = numpy.einsum('wrd, dr->wrd', tmp_wrd, x_tensors[0], optimize=True)
-        return numpy.einsum('wrd, do->wo', tmp_wrd, x_tensors[-1], optimize=False) #optmized is disabled to avoid a bug in numpy
+        #xs_l = x_tensors[1:-1]
+        #freq_dim = len(self.tensors_A)
+        #if freq_dim == 2:
+        #    tmp_wrd = numpy.einsum('wrl,wrm, dl,dm -> wrd', *(self.tensors_A + xs_l), optimize=True)
+        #elif freq_dim == 3:
+        #    tmp_wrd = numpy.einsum('wrl,wrm,wrn, dl,dm,dn -> wrd', *(self.tensors_A + xs_l), optimize=True)
+        #tmp_wrd = numpy.einsum('wrd, dr->wrd', tmp_wrd, x_tensors[0], optimize=True)
+        #return numpy.einsum('wrd, do->wo', tmp_wrd, x_tensors[-1], optimize=False) #optmized is disabled to avoid a bug in numpy
+        return predict(self.tensors_A, x_tensors)
 
     def loss(self, x_tensors=None):
         """
@@ -255,6 +273,7 @@ def linear_operator_l(N1, N2, tensors_A_masked, tensors_A_pos, x_r, xs_l_masked,
     D = x_r.shape[0]
     num_o = x_orb.shape[1]
 
+    # FIXME: THIS CONTRACTION MAY NOT BE OPTIMAL. SEE A BETTER ONE in predict().
     if freq_dim == 2:
         tmp_wrd1 = numpy.einsum('wrl, dr, dl-> wrd', *(tensors_A_masked + [x_r] + xs_l_masked), optimize=True)
     elif freq_dim == 3:

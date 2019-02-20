@@ -159,6 +159,10 @@ class Basis(object):
             self._Unl_cache[nvec_compt[i]] = numpy.sqrt(self._beta) * unl[i,:self._dim]
 
     def compute_Unl(self, nvec, auto_compute=True):
+        # shortcut
+        if len(nvec)==1 and nvec[0] in self._Unl_cache:
+            return self._Unl_cache[nvec[0]].reshape((1, -1))
+
         if auto_compute:
             self._precompute_Unl(nvec)
         num_n = len(nvec)
