@@ -176,7 +176,7 @@ def to_PH_convention(n1n2n3n4):
 
 def from_PH_convention(n_np_m):
     """
-    To particle-hole convention
+    From particle-hole convention
     """
     n, np, m = n_np_m
     return (n+m, -n-1, np, -np-1-m)
