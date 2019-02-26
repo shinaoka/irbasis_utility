@@ -48,24 +48,29 @@ parser.add_argument('path_input_file', action='store', default=None, type=str, h
 parser.add_argument('path_output_file', action='store', default=None, type=str, help="output file name.")
 parser.add_argument('--niter', default=20, type=int, help='Number of iterations')
 parser.add_argument('--D', default=1, type=int, help='Rank of decomposition')
-parser.add_argument('--Lambda', default=0, type=float, help='Lambda')
-parser.add_argument('--beta', default=0, type=float, help='beta')
+#parser.add_argument('--Lambda', default=0, type=float, help='Lambda')
+#parser.add_argument('--beta', default=0, type=float, help='beta')
 
 args = parser.parse_args()
 if os.path.isfile(args.path_input_file) is False:
     print("Input file is not exist.")
     sys.exit(-1)
 
-beta = args.beta
-Lambda = args.Lambda
+#beta = args.beta
+#Lambda = args.Lambda
 
 with h5py.File(args.path_input_file, 'r') as hf:
     freqs_PH = hf['/G2/matsubara/freqs_PH'][()]
     n_freqs = freqs_PH.shape[0]
     data = hf['/G2/matsubara/data'][()].reshape((-1,n_freqs,2))
+    beta = hf['/parameters/model.beta'][()]
+    Lambda = hf['/parameters/measurement.Lambda'][()]
     G2iwn = data[:,:,0] + 1J * data[:,:,1]
     num_o = data.shape[0]
 
+if rank == 0:
+    print("Lambda = ", Lambda)
+    print("beta = ", beta)
 #debug
 #G2iwn = G2iwn[:1, :]
 #num_o = 1
