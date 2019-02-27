@@ -198,7 +198,7 @@ class OvercompleteGFModel(object):
             r += self.alpha * squared_L2_norm(t)
         return r
 
-    def squared_norm(self, x_tensors=None):
+    def squared_norm(self, x_tensors=None, sketch_idx=None):
         """
         Compute mean squared error + L2 regularization term
         """
@@ -219,7 +219,7 @@ class OvercompleteGFModel(object):
 
         return self.alpha
 
-    def se(self, x_tensors=None):
+    def se(self, x_tensors=None, sketch_idx=None):
         """
         Compute squared error
         """
@@ -229,7 +229,10 @@ class OvercompleteGFModel(object):
         y_pre = self.predict_y(x_tensors)
         assert self.y.shape == y_pre.shape
 
-        return squared_L2_norm(self.y - y_pre)
+        if sketch_idx is None:
+            return squared_L2_norm(self.y - y_pre)
+        else:
+            return squared_L2_norm(self.y[sketch_idx,:] - y_pre[sketch_idx,:])
 
     def mse(self, x_tensors=None):
         """
@@ -317,7 +320,7 @@ def __normalize_tensor(tensor):
     norm = numpy.linalg.norm(tensor)
     return tensor/norm, norm
 
-def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0, optimize_alpha=-1, print_interval=20, comm=None, seed=1):
+def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0, optimize_alpha=-1, print_interval=20, comm=None, seed=1, sketch_idx=None):
     """
     Alternating least squares
 
@@ -413,11 +416,25 @@ def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0, optimize_alpha=-1, pri
         model.xs_l[i] = numpy.random.rand(*model.xs_l[i].shape) + 1J*numpy.random.rand(*model.xs_l[i].shape)
     model.x_orb = numpy.random.rand(*model.x_orb.shape) + 1J* numpy.random.rand(*model.x_orb.shape)
 
+    num_tot_w = num_w
     if is_enabled_MPI:
         model.x_r = comm.bcast(model.x_r, root=0)
         for i in range(len(model.xs_l)):
             model.xs_l[i] = comm.bcast(model.xs_l[i], root=0)
         model.x_orb = comm.bcast(model.x_orb, root=0)
+        num_tot_w = comm.allreduce(num_w)
+
+    if sketch_idx is None:
+        num_active_w = num_tot_w
+    else:
+        if is_enabled_MPI:
+            num_active_w = comm.allreduce(len(sketch_idx))
+        else:
+            num_active_w = len(sketch_idx)
+
+    p_sketch = float(num_active_w)/float(num_tot_w)
+    print("p_sketch ", p_sketch)
+
 
     losss = []
     rmses = []
@@ -442,12 +459,19 @@ def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0, optimize_alpha=-1, pri
         if epoch%print_interval == 0:
             if is_enabled_MPI:
                 se = comm.allreduce(model.se())
+                if not sketch_idx is None:
+                    se_sk = comm.allreduce(model.se(sketch_idx=sketch_idx)) / p_sketch
                 snorm = comm.allreduce(model.squared_norm())
                 mse = se/(comm.allreduce(num_w) * num_o)
             else:
                 se = model.se()
+                if not sketch_idx is None:
+                    se_sk = model.se(sketch_idx=sketch_idx) / p_sketch
                 snorm = model.squared_norm()
                 mse = se/(num_w * num_o)
+
+            if not sketch_idx is None and rank == 0:
+                print("se : ", se, se_sk)
 
             rmses.append(numpy.sqrt(mse))
             losss.append(se + model.alpha * snorm)
