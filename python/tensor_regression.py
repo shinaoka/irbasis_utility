@@ -320,7 +320,7 @@ def __normalize_tensor(tensor):
     norm = numpy.linalg.norm(tensor)
     return tensor/norm, norm
 
-def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0, optimize_alpha=-1, print_interval=20, comm=None, seed=1, sketch_idx=None):
+def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0, optimize_alpha=-1, print_interval=20, comm=None, seed=1, p_sketch=1.0):
     """
     Alternating least squares
 
@@ -363,15 +363,35 @@ def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0, optimize_alpha=-1, pri
     freq_dim = model.freq_dim
     linear_dim = model.linear_dim
     num_o = model.num_o
-    tensors_A = model.tensors_A
-    y = model.y
+
+    sketch_on = p_sketch < 1
+
+    numpy.random.seed(seed)
+    model.x_r = numpy.random.rand(*model.x_r.shape) + 1J * numpy.random.rand(*model.x_r.shape)
+    for i in range(len(model.xs_l)):
+        model.xs_l[i] = numpy.random.rand(*model.xs_l[i].shape) + 1J*numpy.random.rand(*model.xs_l[i].shape)
+    model.x_orb = numpy.random.rand(*model.x_orb.shape) + 1J* numpy.random.rand(*model.x_orb.shape)
+
+    if is_enabled_MPI:
+        model.x_r = comm.bcast(model.x_r, root=0)
+        for i in range(len(model.xs_l)):
+            model.xs_l[i] = comm.bcast(model.xs_l[i], root=0)
+        model.x_orb = comm.bcast(model.x_orb, root=0)
+
+    sketch_idx = numpy.arange(num_w)
+    y_sk = model.y
+    tensors_A_sk = model.tensors_A
+    if sketch_on:
+        num_w_sk = int(p_sketch * num_w)
+    else:
+        num_w_sk = num_w
 
     def update_r_tensor():
         """
         Build a least squares model for optimizing core tensor
         """
-        A_op = linear_operator_r(num_w*num_o, D*num_rep, tensors_A, model.x_r, model.xs_l, model.x_orb)
-        model.x_r[:,:] = __ridge_complex_lsqr(num_w*num_o, D * num_rep, A_op, y, model.alpha).reshape((D, num_rep))
+        A_op = linear_operator_r(num_w_sk*num_o, D*num_rep, tensors_A_sk, model.x_r, model.xs_l, model.x_orb)
+        model.x_r[:,:] = __ridge_complex_lsqr(num_w_sk*num_o, D * num_rep, A_op, y_sk, model.alpha).reshape((D, num_rep))
 
     def update_l_tensor(pos):
         assert pos >= 0
@@ -379,14 +399,14 @@ def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0, optimize_alpha=-1, pri
         t1 = time.time()
 
         mask = numpy.arange(freq_dim) != pos
-        tensors_A_masked = list(compress(tensors_A, mask))
+        tensors_A_masked = list(compress(tensors_A_sk, mask))
         xs_l_masked = list(compress(model.xs_l, mask))
 
-        A_op = linear_operator_l(num_w*num_o, D*linear_dim, tensors_A_masked, tensors_A[pos], model.x_r, xs_l_masked, model.x_orb)
+        A_op = linear_operator_l(num_w_sk*num_o, D*linear_dim, tensors_A_masked, tensors_A_sk[pos], model.x_r, xs_l_masked, model.x_orb)
 
-        # At this point, A_lsm is shape of (num_w, num_o, D, Nl)
+        # At this point, A_lsm is shape of (num_w_sk, num_o, D, Nl)
         t2 = time.time()
-        model.xs_l[pos][:,:] = __ridge_complex_lsqr(num_w*num_o, D*linear_dim, A_op, y, model.alpha, x0=model.xs_l[pos].ravel()).reshape((D, linear_dim))
+        model.xs_l[pos][:,:] = __ridge_complex_lsqr(num_w_sk*num_o, D*linear_dim, A_op, y_sk, model.alpha, x0=model.xs_l[pos].ravel()).reshape((D, linear_dim))
         t3 = time.time()
         if verbose >= 2:
             print("rest : time ", t2-t1, t3-t2)
@@ -397,49 +417,29 @@ def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0, optimize_alpha=-1, pri
 
         if freq_dim == 2:
             A_lsm = numpy.einsum('wrl,wrm, dr, dl,dm -> w d',
-                               *(tensors_A + [model.x_r] + model.xs_l), optimize=True)
+                               *(tensors_A_sk + [model.x_r] + model.xs_l), optimize=True)
         elif freq_dim == 3:
             A_lsm = numpy.einsum('wrl,wrm,wrn, dr, dl,dm,dn -> w d',
-                                 *(tensors_A + [model.x_r] + model.xs_l), optimize=True)
+                                 *(tensors_A_sk + [model.x_r] + model.xs_l), optimize=True)
 
-        # At this point, A_lsm is shape of (num_w, D)
+        # At this point, A_lsm is shape of (num_w_sk, D)
         for o in range(num_o):
-            model.x_orb[:, o] = __ridge_complex_lsqr(num_w, D, A_lsm, y[:, o], model.alpha)
+            model.x_orb[:, o] = __ridge_complex_lsqr(num_w_sk, D, A_lsm, y_sk[:, o], model.alpha)
 
         t3 = time.time()
         if verbose >= 2:
             print("rest : time ", t2-t1, t3-t2)
-
-    numpy.random.seed(seed)
-    model.x_r = numpy.random.rand(*model.x_r.shape) + 1J * numpy.random.rand(*model.x_r.shape)
-    for i in range(len(model.xs_l)):
-        model.xs_l[i] = numpy.random.rand(*model.xs_l[i].shape) + 1J*numpy.random.rand(*model.xs_l[i].shape)
-    model.x_orb = numpy.random.rand(*model.x_orb.shape) + 1J* numpy.random.rand(*model.x_orb.shape)
-
-    num_tot_w = num_w
-    if is_enabled_MPI:
-        model.x_r = comm.bcast(model.x_r, root=0)
-        for i in range(len(model.xs_l)):
-            model.xs_l[i] = comm.bcast(model.xs_l[i], root=0)
-        model.x_orb = comm.bcast(model.x_orb, root=0)
-        num_tot_w = comm.allreduce(num_w)
-
-    if sketch_idx is None:
-        num_active_w = num_tot_w
-    else:
-        if is_enabled_MPI:
-            num_active_w = comm.allreduce(len(sketch_idx))
-        else:
-            num_active_w = len(sketch_idx)
-
-    p_sketch = float(num_active_w)/float(num_tot_w)
-    print("p_sketch ", p_sketch)
 
 
     losss = []
     rmses = []
     for epoch in range(nite):
         sys.stdout.flush()
+
+        if sketch_on:
+            sketch_idx = numpy.random.randint(num_w, size=num_w_sk)
+            y_sk = model.y[sketch_idx, :]
+            tensors_A_sk = [t[sketch_idx, :] for t in model.tensors_A]
 
         # Optimize r tensor
         t1 = time.time()
@@ -458,20 +458,13 @@ def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0, optimize_alpha=-1, pri
 
         if epoch%print_interval == 0:
             if is_enabled_MPI:
-                se = comm.allreduce(model.se())
-                if not sketch_idx is None:
-                    se_sk = comm.allreduce(model.se(sketch_idx=sketch_idx)) / p_sketch
+                se = comm.allreduce(model.se(sketch_idx=sketch_idx)) / p_sketch
                 snorm = comm.allreduce(model.squared_norm())
                 mse = se/(comm.allreduce(num_w) * num_o)
             else:
-                se = model.se()
-                if not sketch_idx is None:
-                    se_sk = model.se(sketch_idx=sketch_idx) / p_sketch
+                se = model.se(sketch_idx=sketch_idx) / p_sketch
                 snorm = model.squared_norm()
                 mse = se/(num_w * num_o)
-
-            if not sketch_idx is None and rank == 0:
-                print("se : ", se, se_sk)
 
             rmses.append(numpy.sqrt(mse))
             losss.append(se + model.alpha * snorm)
