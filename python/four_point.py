@@ -69,20 +69,20 @@ class FourPoint(object):
         """
         n_f = []
         n_b = []
-        for i in range(len(n1_n2_n3_n4_vec)):
+        nw = len(n1_n2_n3_n4_vec)
+        for i in range(nw):
             for n in n1_n2_n3_n4_vec[i]:
                 n_f.append(n)
-                n_f.append(-n-1)
+                n_f.append(-n - 1)
             for n, np in product(n1_n2_n3_n4_vec[i], repeat=2):
                 n_b.append(n + np + 1)
         self._Bf._precompute_Unl(n_f)
         self._Bb._precompute_Unl(n_b)
 
         if decomposed_form:
-            nw = len(n1_n2_n3_n4_vec)
             r = [numpy.zeros((nw, 16, self._Nl), dtype=complex) for i in range(3)]
             for i, (n1, n2, n3, n4) in enumerate(n1_n2_n3_n4_vec):
-                M1, M2, M3 = self.projector_to_matsubara(n1, n2, n3, n4, True)
+                M1, M2, M3 = self.projector_to_matsubara(n1, n2, n3, n4, decomposed_form)
                 r[0][i, :, :] = M1
                 r[1][i, :, :] = M2
                 r[2][i, :, :] = M3
@@ -90,7 +90,7 @@ class FourPoint(object):
         else:
             r = []
             for n1, n2, n3, n4 in n1_n2_n3_n4_vec:
-                r.append(self.projector_to_matsubara(n1, n2, n3, n4))
+                r.append(self.projector_to_matsubara(n1, n2, n3, n4, decomposed_form))
             return r
 
     def projector_to_matsubara(self, n1, n2, n3, n4, decomposed_form = False):
@@ -128,8 +128,8 @@ class FourPoint(object):
         """
         Return sampling points
         """
-        sp_o_f = 2*sampling_points_matsubara(self._Bf, whichl) + 1
-        sp_o_b = 2*sampling_points_matsubara(self._Bb, whichl)
+        sp_o_f = 2 * sampling_points_matsubara(self._Bf, whichl) + 1
+        sp_o_b = 2 * sampling_points_matsubara(self._Bb, whichl)
         sp_o = []
         Nf = len(sp_o_f)
         Nb = len(sp_o_b)
@@ -169,7 +169,7 @@ def to_PH_convention(n1n2n3n4):
     """
     To particle-hole convention
     """
-    n = -n1n2n3n4[1]-1
+    n = -n1n2n3n4[1] - 1
     np = n1n2n3n4[2]
     m = n1n2n3n4[0] + n1n2n3n4[1] + 1
     return (n, np, m)
@@ -179,4 +179,4 @@ def from_PH_convention(n_np_m):
     From particle-hole convention
     """
     n, np, m = n_np_m
-    return (n+m, -n-1, np, -np-1-m)
+    return (n + m, -n - 1, np, -np - 1 - m)
