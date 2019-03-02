@@ -56,7 +56,6 @@ __all__ = ['lsqr']
 import numpy as np
 from math import sqrt
 from scipy.sparse.linalg.interface import aslinearoperator
-from mpi4py import MPI
 
 eps = np.finfo(np.float64).eps
 
@@ -97,7 +96,7 @@ def _sym_ortho(a, b):
 
 
 def lsqr(A, b, damp=0.0, atol=1e-8, btol=1e-8, conlim=1e8,
-         iter_lim=None, show=False, calc_var=False, x0=None, comm=MPI.COMM_WORLD):
+         iter_lim=None, show=False, calc_var=False, x0=None, comm=None, atol_r1norm=None):
     """Find the least-squares solution to a large, sparse, linear system
     of equations.
 
@@ -108,7 +107,14 @@ def lsqr(A, b, damp=0.0, atol=1e-8, btol=1e-8, conlim=1e8,
 
     """
 
-    rank = comm.Get_rank()
+    MPI_on = not comm is None
+
+    if MPI_on:
+        from mpi4py import MPI
+        rank = comm.Get_rank()
+    else:
+        rank = 0
+
 
     A = aslinearoperator(A)
     b = np.atleast_1d(b)
@@ -158,7 +164,10 @@ def lsqr(A, b, damp=0.0, atol=1e-8, btol=1e-8, conlim=1e8,
     sn2 = 0
 
     def norm_allreduce(vec):
-        return sqrt(comm.allreduce(np.dot(vec.conjugate(),vec).real))
+        if MPI_on:
+            return sqrt(comm.allreduce(np.dot(vec.conjugate(),vec).real))
+        else:
+            return np.linalg.norm(vec)
 
     """
     Set up the first vectors u and v for the bidiagonalization.
@@ -176,7 +185,10 @@ def lsqr(A, b, damp=0.0, atol=1e-8, btol=1e-8, conlim=1e8,
 
     if beta > 0:
         u = (1/beta) * u
-        v = comm.allreduce(A.rmatvec(u))
+        if MPI_on:
+            v = comm.allreduce(A.rmatvec(u))
+        else:
+            v = A.rmatvec(u)
         alfa = np.linalg.norm(v)
     else:
         v = x.copy()
@@ -212,6 +224,8 @@ def lsqr(A, b, damp=0.0, atol=1e-8, btol=1e-8, conlim=1e8,
         str3 = '  %8.1e %8.1e' % (test1, test2)
         print(str1, str2, str3)
 
+    r1norm_old = None
+
     # Main iteration loop.
     while itn < iter_lim:
         itn = itn + 1
@@ -228,7 +242,10 @@ def lsqr(A, b, damp=0.0, atol=1e-8, btol=1e-8, conlim=1e8,
         if beta > 0:
             u = (1/beta) * u
             anorm = sqrt(anorm**2 + alfa**2 + beta**2 + damp**2)
-            v = comm.allreduce(A.rmatvec(u)) - beta * v
+            if MPI_on:
+                v = comm.allreduce(A.rmatvec(u)) - beta * v
+            else:
+                v = A.rmatvec(u) - beta * v
             alfa = np.linalg.norm(v)
             if alfa > 0:
                 v = (1 / alfa) * v
@@ -321,6 +338,11 @@ def lsqr(A, b, damp=0.0, atol=1e-8, btol=1e-8, conlim=1e8,
         if 1 + t1 <= 1:
             istop = 4
 
+        if not r1norm_old is None:
+            if abs(abs(r1norm) - r1norm_old) < atol_r1norm:
+                istop = 99
+        r1norm_old = abs(r1norm)
+
         # Allow for tolerances set by the user.
         if test3 <= ctol:
             istop = 3
@@ -375,7 +397,8 @@ def lsqr(A, b, damp=0.0, atol=1e-8, btol=1e-8, conlim=1e8,
 
     return x, istop, itn, r1norm, r2norm, anorm, acond, arnorm, xnorm, var
 
-if __name__ == '__main__': 
+if __name__ == '__main__':
+    from mpi4py import MPI
     from scipy.sparse.linalg import lsqr as lsqr_ref
 
     comm = MPI.COMM_WORLD

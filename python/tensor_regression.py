@@ -305,19 +305,16 @@ def linear_operator_l(N1, N2, tensors_A_masked, tensors_A_pos, x_r, xs_l_masked,
 
     return LinearOperator((N1, N2), matvec=matvec, rmatvec=rmatvec)
 
-def __ridge_complex_lsqr(N1, N2, A, y, alpha, num_data=1, verbose=0, x0=None):
-    if is_enabled_MPI:
-        from .lsqr import lsqr
-    else:
-        from scipy.sparse.linalg import lsqr
-    r = lsqr(A, y.reshape((N1, num_data)), damp=numpy.sqrt(alpha), x0=x0)
+def __ridge_complex_lsqr(N1, N2, A, y, alpha, num_data=1, verbose=0, x0=None, atol=None):
+    from .lsqr import lsqr
+    r = lsqr(A, y.reshape((N1, num_data)), damp=numpy.sqrt(alpha), x0=x0, atol_r1norm=atol)
     return r[0]
 
 def __normalize_tensor(tensor):
     norm = numpy.linalg.norm(tensor)
     return tensor/norm, norm
 
-def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0, optimize_alpha=-1, print_interval=20, comm=None, seed=1):
+def optimize_als(model, nite, rtol = 1e-5, verbose=0, optimize_alpha=-1, print_interval=20, comm=None, seed=1):
     """
     Alternating least squares
 
@@ -329,8 +326,10 @@ def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0, optimize_alpha=-1, pri
     nite: int
         Number of max iterations.
 
-    tol_rmse: float
-        Stopping condition of optimization. rmse denotes "root mean squared error".
+    rtol: float
+        Stopping condition of optimization.
+        Iterations stop if abs(||r_k|| - ||r_{k-1}||) < rtol * ||y||
+        r_k is the residual vector at iteration k.
 
     verbose: int
         0, 1, 2
@@ -368,7 +367,7 @@ def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0, optimize_alpha=-1, pri
         Build a least squares model for optimizing core tensor
         """
         A_op = linear_operator_r(num_w*num_o, D*num_rep, tensors_A, model.x_r, model.xs_l, model.x_orb)
-        model.x_r[:,:] = __ridge_complex_lsqr(num_w*num_o, D * num_rep, A_op, y, model.alpha).reshape((D, num_rep))
+        model.x_r[:,:] = __ridge_complex_lsqr(num_w*num_o, D * num_rep, A_op, y, model.alpha, atol=atol_lsqr).reshape((D, num_rep))
 
     def update_l_tensor(pos):
         assert pos >= 0
@@ -383,7 +382,9 @@ def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0, optimize_alpha=-1, pri
 
         # At this point, A_lsm is shape of (num_w, num_o, D, Nl)
         t2 = time.time()
-        model.xs_l[pos][:,:] = __ridge_complex_lsqr(num_w*num_o, D*linear_dim, A_op, y, model.alpha, x0=model.xs_l[pos].ravel()).reshape((D, linear_dim))
+        model.xs_l[pos][:,:] = __ridge_complex_lsqr(num_w*num_o, D*linear_dim, A_op, y, model.alpha,
+                                                    x0=model.xs_l[pos].ravel(),
+                                                    atol=atol_lsqr).reshape((D, linear_dim))
         t3 = time.time()
         if verbose >= 2:
             print("rest : time ", t2-t1, t3-t2)
@@ -401,7 +402,7 @@ def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0, optimize_alpha=-1, pri
 
         # At this point, A_lsm is shape of (num_w, D)
         for o in range(num_o):
-            model.x_orb[:, o] = __ridge_complex_lsqr(num_w, D, A_lsm, y[:, o], model.alpha)
+            model.x_orb[:, o] = __ridge_complex_lsqr(num_w, D, A_lsm, y[:, o], model.alpha, atol=atol_lsqr)
 
         t3 = time.time()
         if verbose >= 2:
@@ -419,8 +420,35 @@ def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0, optimize_alpha=-1, pri
             model.xs_l[i] = comm.bcast(model.xs_l[i], root=0)
         model.x_orb = comm.bcast(model.x_orb, root=0)
 
+    def compute_residual():
+        if is_enabled_MPI:
+            se = comm.allreduce(model.se())
+            snorm = comm.allreduce(model.squared_norm())
+            mse = se/(comm.allreduce(num_w) * num_o)
+        else:
+            se = model.se()
+            snorm = model.squared_norm()
+            mse = se/(num_w * num_o)
+        return se, snorm, mse
+
     losss = []
     rmses = []
+    squared_errors = []
+
+    se0, snorm0, mse0 = compute_residual()
+    squared_errors.append(se0)
+    rmses.append(numpy.sqrt(mse0))
+    losss.append(se0 + model.alpha * snorm0)
+
+    if is_enabled_MPI:
+        norm_y = numpy.sqrt(comm.allreduce(numpy.linalg.norm(model.y)**2))
+        num_w_tot = comm.allreduce(num_w)
+    else:
+        norm_y = numpy.linalg.norm(model.y)
+        num_w_tot = num_w
+
+    atol_lsqr = 0.1 * rtol * norm_y
+
     for epoch in range(nite):
         sys.stdout.flush()
 
@@ -439,25 +467,21 @@ def optimize_als(model, nite, tol_rmse = 1e-5, verbose=0, optimize_alpha=-1, pri
 
         t4 = time.time()
 
+        se, snorm, mse = compute_residual()
+        squared_errors.append(se)
+        rmses.append(numpy.sqrt(mse))
+        losss.append(se + model.alpha * snorm)
+
+        d_res_norm = numpy.abs(numpy.sqrt(squared_errors[-1]) - numpy.sqrt(squared_errors[-2]))
+        atol_lsqr = max(1e-2 * d_res_norm, 0.1 * rtol * norm_y)
+        #print("debug ", epoch, atol_lsqr)
+
         if epoch%print_interval == 0:
-            if is_enabled_MPI:
-                se = comm.allreduce(model.se())
-                snorm = comm.allreduce(model.squared_norm())
-                mse = se/(comm.allreduce(num_w) * num_o)
-            else:
-                se = model.se()
-                snorm = model.squared_norm()
-                mse = se/(num_w * num_o)
-
-            rmses.append(numpy.sqrt(mse))
-            losss.append(se + model.alpha * snorm)
-
             if verbose > 0 and rank == 0:
                 print("epoch = ", epoch, " loss = ", losss[-1], " rmse = ", rmses[-1], " alpha = ", model.alpha)
 
         if len(rmses) > 2:
-            diff_rmse = numpy.abs(rmses[-2] - rmses[-1])
-            if diff_rmse < tol_rmse:
+            if numpy.abs(rmses[-2] - rmses[-1]) < rtol * (norm_y/numpy.sqrt(num_w_tot)):
                 break
 
         if optimize_alpha > 0:
