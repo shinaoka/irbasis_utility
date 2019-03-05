@@ -55,7 +55,7 @@ class augmented_basis_b(object):
             return self._bb.ulx(l-2, x)
 
     def ulx_all_l(self, x):
-        r = numpy.zeros((dim_))
+        r = numpy.zeros((self._dim))
         r[0] = numpy.sqrt(0.5)
         r[1] = numpy.sqrt(1.5) * x
         r[2:] = self._bb.ulx_all_l(x)
