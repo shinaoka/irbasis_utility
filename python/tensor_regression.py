@@ -404,10 +404,21 @@ def optimize_als(model, nite, rtol = 1e-5, verbose=0, optimize_alpha=-1, print_i
         elif freq_dim == 3:
             A_lsm = numpy.einsum('wrl,wrm,wrn, dr, dl,dm,dn -> w d',
                                  *(tensors_A + [model.x_r] + model.xs_l), optimize=True)
+        # A_lsm_c: (D, num_w)
+        A_lsm_c = A_lsm.conjugate().transpose()
 
-        # At this point, A_lsm is shape of (num_w, D)
-        for o in range(num_o):
-            model.x_orb[:, o] = __ridge_complex_lsqr(num_w, D, A_lsm, y[:, o], model.alpha, atol=atol_lsqr, comm=comm)
+        def matvec(x):
+            return numpy.dot(A_lsm, x.reshape((D, num_o))).ravel()
+
+        def rmatvec(y):
+            # Return (D, num_o)
+            y = y.reshape((num_w, num_o))
+            return numpy.dot(A_lsm_c, y).ravel()
+
+        N1, N2 = num_w*num_o, D*num_o
+        A_lsm_op = LinearOperator((N1, N2), matvec=matvec, rmatvec=rmatvec)
+        model.x_orb[:, :] = __ridge_complex_lsqr(N1, N2, A_lsm_op, y,
+                                                 model.alpha, atol=atol_lsqr, comm=comm).reshape((D, num_o))
 
         t3 = time.time()
         if verbose >= 2:
