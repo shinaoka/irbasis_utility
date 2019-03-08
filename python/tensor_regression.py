@@ -305,9 +305,14 @@ def linear_operator_l(N1, N2, tensors_A_masked, tensors_A_pos, x_r, xs_l_masked,
 
     return LinearOperator((N1, N2), matvec=matvec, rmatvec=rmatvec)
 
-def __ridge_complex_lsqr(N1, N2, A, y, alpha, num_data=1, verbose=0, x0=None, atol=None):
+def __ridge_complex_lsqr(N1, N2, A, y, alpha, num_data=1, verbose=0, x0=None, atol=None, comm=None):
     from .lsqr import lsqr
-    r = lsqr(A, y.reshape((N1, num_data)), damp=numpy.sqrt(alpha), x0=x0, atol_r1norm=atol)
+    if is_enabled_MPI:
+        if comm is None:
+            raise RuntimeError("comm is None")
+    #r = lsqr(A, y.reshape((N1, num_data)), damp=numpy.sqrt(alpha), x0=x0, atol_r1norm=0.0, comm=comm)
+    r = lsqr(A, y.reshape((N1, num_data)), damp=numpy.sqrt(alpha), x0=x0, atol_r1norm=atol, comm=comm)
+    #r = lsqr(A, y.reshape((N1, num_data)), damp=numpy.sqrt(alpha), x0=x0, atol_r1norm=atol)
     return r[0]
 
 def __normalize_tensor(tensor):
@@ -367,7 +372,7 @@ def optimize_als(model, nite, rtol = 1e-5, verbose=0, optimize_alpha=-1, print_i
         Build a least squares model for optimizing core tensor
         """
         A_op = linear_operator_r(num_w*num_o, D*num_rep, tensors_A, model.x_r, model.xs_l, model.x_orb)
-        model.x_r[:,:] = __ridge_complex_lsqr(num_w*num_o, D * num_rep, A_op, y, model.alpha, atol=atol_lsqr).reshape((D, num_rep))
+        model.x_r[:,:] = __ridge_complex_lsqr(num_w*num_o, D * num_rep, A_op, y, model.alpha, atol=atol_lsqr, comm=comm).reshape((D, num_rep))
 
     def update_l_tensor(pos):
         assert pos >= 0
@@ -384,7 +389,7 @@ def optimize_als(model, nite, rtol = 1e-5, verbose=0, optimize_alpha=-1, print_i
         t2 = time.time()
         model.xs_l[pos][:,:] = __ridge_complex_lsqr(num_w*num_o, D*linear_dim, A_op, y, model.alpha,
                                                     x0=model.xs_l[pos].ravel(),
-                                                    atol=atol_lsqr).reshape((D, linear_dim))
+                                                    atol=atol_lsqr, comm=comm).reshape((D, linear_dim))
         t3 = time.time()
         if verbose >= 2:
             print("rest : time ", t2-t1, t3-t2)
@@ -402,7 +407,7 @@ def optimize_als(model, nite, rtol = 1e-5, verbose=0, optimize_alpha=-1, print_i
 
         # At this point, A_lsm is shape of (num_w, D)
         for o in range(num_o):
-            model.x_orb[:, o] = __ridge_complex_lsqr(num_w, D, A_lsm, y[:, o], model.alpha, atol=atol_lsqr)
+            model.x_orb[:, o] = __ridge_complex_lsqr(num_w, D, A_lsm, y[:, o], model.alpha, atol=atol_lsqr, comm=comm)
 
         t3 = time.time()
         if verbose >= 2:
