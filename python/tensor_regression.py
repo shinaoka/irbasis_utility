@@ -398,12 +398,14 @@ def optimize_als(model, nite, rtol = 1e-5, verbose=0, optimize_alpha=-1, print_i
 
         t1 = time.time()
 
-        if freq_dim == 2:
-            A_lsm = numpy.einsum('wrl,wrm, dr, dl,dm -> w d',
-                               *(tensors_A + [model.x_r] + model.xs_l), optimize=True)
-        elif freq_dim == 3:
-            A_lsm = numpy.einsum('wrl,wrm,wrn, dr, dl,dm,dn -> w d',
-                                 *(tensors_A + [model.x_r] + model.xs_l), optimize=True)
+        # (wrl, dl) -> (wrd)
+        # (wrm, dm) -> (wrd)
+        # (wrn, dn) -> (wrd)
+        tmp_wrd = numpy.full((num_w, num_rep, D), complex(1.0))
+        for i in range(freq_dim):
+            tmp_wrd *= numpy.einsum('wrl, dl -> wrd', tensors_A[i], model.xs_l[i], optimize=True)
+        A_lsm = numpy.einsum('wrd,dr -> w d', tmp_wrd, model.x_r, optimize=True)
+
         # A_lsm_c: (D, num_w)
         A_lsm_c = A_lsm.conjugate().transpose()
 
