@@ -244,10 +244,9 @@ def linear_operator_r(N1, N2, tensors_A, x_r, xs_l, x_orb):
     num_o = x_orb.shape[1]
 
     freq_dim = len(tensors_A)
-    if freq_dim == 2:
-        tmp_wrd = numpy.einsum('wrl,wrm, dl,dm -> wrd', *(tensors_A + xs_l), optimize=True)
-    elif freq_dim == 3:
-        tmp_wrd = numpy.einsum('wrl,wrm,wrn, dl,dm,dn -> wrd', *(tensors_A + xs_l), optimize=True)
+    tmp_wrd = numpy.full((num_w, R, D), complex(1.0))
+    for i in range(freq_dim):
+        tmp_wrd *= numpy.einsum('wrl, dl -> wrd', tensors_A[i], xs_l[i], optimize=True)
 
     def matvec(x):
         x = x.reshape((D, R))
