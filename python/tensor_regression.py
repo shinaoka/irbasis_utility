@@ -270,38 +270,30 @@ def linear_operator_l(N1, N2, tensors_A_masked, tensors_A_pos, x_r, xs_l_masked,
     D = x_r.shape[0]
     num_o = x_orb.shape[1]
 
-    # FIXME: THIS CONTRACTION MAY NOT BE OPTIMAL. SEE A BETTER ONE in predict().
-    if freq_dim == 2:
-        tmp_wrd1 = numpy.einsum('wrl, dr, dl-> wrd', *(tensors_A_masked + [x_r] + xs_l_masked), optimize=True)
-    elif freq_dim == 3:
-        tmp_wrd1 = numpy.einsum('wrl,wrm, dr, dl,dm-> wrd', *(tensors_A_masked + [x_r] + xs_l_masked), optimize=True)
-    else:
-        raise RuntimeError("freq_dim must be either 2 or 3!")
-
+    tmp_wrd1 = numpy.full((num_w, R, D), complex(1.0))
+    for i in range(freq_dim-1):
+        tmp_wrd1 *= numpy.einsum('wrl, dl -> wrd', tensors_A_masked[i], xs_l_masked[i], optimize=True)
+    tmp_wrd1 = numpy.einsum('wrd, dr->wrd', tmp_wrd1, x_r, optimize=True)
+    tmp_wdn = numpy.einsum('wrd, wrn->wdn', tmp_wrd1, tensors_A_pos, optimize=True)
+   
     def matvec(x):
         # x                 dn
         # tensors_A_pos     wrn
         #   ===> wrd
         # x_orb             do
         x = x.reshape((D, linear_dim))
-        tmp_wrd2 = numpy.einsum('dn, wrn -> wrd', x, tensors_A_pos, optimize=True)
-        tmp_wd = numpy.einsum('wrd, wrd -> wd', tmp_wrd1, tmp_wrd2, optimize=True)
-        tmp_wo = numpy.einsum('wd, do -> wo', tmp_wd, x_orb, optimize=True).reshape(-1)
+        tmp_wd = numpy.einsum('dn, wdn -> wd', x, tmp_wdn, optimize=True)
+        tmp_wo = numpy.einsum('wd, do -> wo', tmp_wd, x_orb, optimize=True).ravel()
         return tmp_wo
 
-    # tmp_wrd1          wrd
-    # tensors_A_pos     wrn
-    #    ===> wdn
-    tmp_wdn = numpy.einsum('wrd, wrn -> wdn', tmp_wrd1, tensors_A_pos, optimize=True).conjugate()
     def rmatvec(y):
-        # Note: do not forget to take complex conjugate of A
-        # y                 wo
-        #    ===> dno
-        # x_orb             do
-        #    ===> dn
+        # (wdn), (do), (wo) -> (dn)
+        # (do), (wo) -> (wd) : O(Nw D No)
+        # (wd), (wdn) -> (dn) : O(Nw D Nl)
         y = y.reshape((num_w, num_o))
-        tmp_dno = numpy.einsum('wdn, wo -> dno', tmp_wdn, y, optimize=True)
-        return numpy.einsum('dno, do -> dn', tmp_dno, numpy.conj(x_orb), optimize=True).reshape(-1)
+        tmp_wd = numpy.einsum('do, wo -> wd', numpy.conj(x_orb), y, optimize=True)
+        tmp_dn = numpy.einsum('wd, wdn -> dn', tmp_wd, numpy.conj(tmp_wdn), optimize=True)
+        return tmp_dn.ravel()
 
     return LinearOperator((N1, N2), matvec=matvec, rmatvec=rmatvec)
 
