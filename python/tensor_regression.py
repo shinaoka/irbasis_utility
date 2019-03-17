@@ -250,11 +250,18 @@ def linear_operator_r(N1, N2, tensors_A, x_r, xs_l, x_orb):
 
     def matvec(x):
         x = x.reshape((D, R))
-        return numpy.einsum('wrd, do, dr->wo', tmp_wrd, x_orb, x, optimize=True).reshape(-1)
+        # (wrd) * (dr) => (wd): O(Nw D R)
+        tmp_wd_ = numpy.einsum('wrd, dr->wd', tmp_wrd, x, optimize=True)
+        # (wd) * (do) => (wo): O(Nw D No)
+        tmp_wo_ = numpy.einsum('wd, do->wo', tmp_wd_, x_orb, optimize=True).ravel()
+        return tmp_wo_
 
     def rmatvec(y):
         y_c = y.reshape((num_w, num_o)).conjugate()
-        x_c = numpy.einsum('wrd, do, wo->dr', tmp_wrd, x_orb, y_c, optimize=True).reshape(-1)
+        # O(Nw D No)
+        tmp_wd_ = numpy.einsum('do, wo -> wd', x_orb, y_c, optimize=True)
+        # O(Nw D R)
+        x_c = numpy.einsum('wrd, wd -> dr', tmp_wrd, tmp_wd_, optimize=True).ravel()
         return x_c.conjugate()
 
     return LinearOperator((N1, N2), matvec=matvec, rmatvec=rmatvec)
