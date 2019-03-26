@@ -36,27 +36,6 @@ def squared_L2_norm(x):
     """
     return numpy.linalg.norm(x)**2
 
-def cp_to_full_tensor(x_tensors):
-    """
-    Construct a full tensor representation
-    
-    sum_d X_0(d,l0) * X_1(d,l1) * X_2(d,l2) * ...
-    
-    We contract the tensors from left to right as follows:
-        X_0(d, l0) -> tildeT(d, l0)
-        tildeT(d,l0) * X_1(d,l1) -> tildeT(d, l0, l1)
-    """
-    dim = len(x_tensors)
-    dims = [x.shape[1] for x in x_tensors]
-    D = x_tensors[0].shape[0]
-    
-    tildeT = x_tensors[0]
-    for i in range(1, dim):
-        tildeT_reshaped = numpy.reshape(tildeT, (D,-1))
-        tildeT = numpy.einsum('dI,di->dIi', tildeT_reshaped, x_tensors[i])
-    full_tensor = numpy.sum(numpy.reshape(tildeT, (D,) + tuple(dims)), axis=0)
-    return full_tensor
-
 def predict(prj, x_tensors):
     xs_l = x_tensors[1:-1]
     freq_dim = len(prj)
@@ -84,11 +63,10 @@ class OvercompleteGFModel(object):
     The shape of A is (num_w, num_rep, linear_dim, linear_dim, ...)
     freq_di is the number of frequency indices.
 
-    x(d, r, l1, l2, ...) = \sum_d X_0(d,r) * X_1(d,l1) * X_2(d,l2) * ... * X_{freq_dim-1}(d, l_{freq_dim-1})
-        * X_{freq_dim}(d, i)
-        * X_{freq_dim}(d, j)
-        * X_{freq_dim}(d, k)
-        * X_{freq_dim}(d, l)
+    x(d, r, l1, l2, ..., o) = \sum_d X_0(d,r) * X_1(d,l1) * X_2(d,l2) * ... * X_{freq_dim-1}(d, l_{freq_dim-1})
+        * X_{freq_dim}(d, o).
+
+    o is an index for orbital components.
 
     """
     def __init__(self, num_w, num_rep, freq_dim, num_o, linear_dim, tensors_A, y, alpha, D):
@@ -102,12 +80,12 @@ class OvercompleteGFModel(object):
         num_rep : int
             Number of representations (meshes).
             For three-frequency objects, num_rep = 16.
-            For particle-hole vies, num_rep = 12.
+            For particle-hole views, num_rep = 12.
 
         freq_dim : int
             Dimension of frequency axes.
             For three-frequency objects, freq_dim = 3.
-            For particle-hole vies, freq_dim = 2.
+            For particle-hole views, freq_dim = 2.
 
         linear_dim : int
             The linear dimension of IR
@@ -161,26 +139,10 @@ class OvercompleteGFModel(object):
     def predict_y(self, x_tensors=None):
         """
         Predict y from self.x_tensors
-    
-        sum_d sum_{r,l1,l2,...} A(n, r, l1, l2, ...) * X_0(d,r) * X_1(d,l1) * X_2(d,l2) * ...
-    
-        We used A(n, r, l1, l2, ...) = U_1(n, r, l1) * U_2(n, r, l2) * ...
-    
-        We contract the tensors as follows:
-            U_1(n, r, l1) * X_1(d, l1) -> UX_1(n, r, d)
-            U_2(n, r, l2) * X_2(d, l2) -> UX_2(n, r, d)
         """
         if x_tensors is None:
             x_tensors = self.x_tensors()
 
-        #xs_l = x_tensors[1:-1]
-        #freq_dim = len(self.tensors_A)
-        #if freq_dim == 2:
-        #    tmp_wrd = numpy.einsum('wrl,wrm, dl,dm -> wrd', *(self.tensors_A + xs_l), optimize=True)
-        #elif freq_dim == 3:
-        #    tmp_wrd = numpy.einsum('wrl,wrm,wrn, dl,dm,dn -> wrd', *(self.tensors_A + xs_l), optimize=True)
-        #tmp_wrd = numpy.einsum('wrd, dr->wrd', tmp_wrd, x_tensors[0], optimize=True)
-        #return numpy.einsum('wrd, do->wo', tmp_wrd, x_tensors[-1], optimize=False) #optmized is disabled to avoid a bug in numpy
         return predict(self.tensors_A, x_tensors)
 
     def loss(self, x_tensors=None):
@@ -244,6 +206,8 @@ def linear_operator_r(N1, N2, tensors_A, x_r, xs_l, x_orb):
     num_o = x_orb.shape[1]
 
     freq_dim = len(tensors_A)
+    # O(Nw D R Nl)
+    # 3* 10^5 * 100 * 10 * 30 = 10^10
     tmp_wrd = numpy.full((num_w, R, D), complex(1.0))
     for i in range(freq_dim):
         tmp_wrd *= numpy.einsum('wrl, dl -> wrd', tensors_A[i], xs_l[i], optimize=True)
@@ -267,15 +231,12 @@ def linear_operator_r(N1, N2, tensors_A, x_r, xs_l, x_orb):
     return LinearOperator((N1, N2), matvec=matvec, rmatvec=rmatvec)
 
 def linear_operator_l(N1, N2, tensors_A_masked, tensors_A_pos, x_r, xs_l_masked, x_orb):
-    # tensors_A_masked  [wrl]
-    # x_r               dr
-    # xs_l_masked       [dl]
-    #   ===> wrd
     freq_dim = len(tensors_A_masked)+1
     num_w, R, linear_dim = tensors_A_masked[0].shape
     D = x_r.shape[0]
     num_o = x_orb.shape[1]
 
+    # O(Nw D R Nl)
     tmp_wrd1 = numpy.full((num_w, R, D), complex(1.0))
     for i in range(freq_dim-1):
         tmp_wrd1 *= numpy.einsum('wrl, dl -> wrd', tensors_A_masked[i], xs_l_masked[i], optimize=True)
@@ -288,7 +249,9 @@ def linear_operator_l(N1, N2, tensors_A_masked, tensors_A_pos, x_r, xs_l_masked,
         #   ===> wrd
         # x_orb             do
         x = x.reshape((D, linear_dim))
+        # O(Nw D Nl)
         tmp_wd = numpy.einsum('dn, wdn -> wd', x, tmp_wdn, optimize=True)
+        # O(Nw D No)
         tmp_wo = numpy.einsum('wd, do -> wo', tmp_wd, x_orb, optimize=True).ravel()
         return tmp_wo
 
@@ -297,7 +260,9 @@ def linear_operator_l(N1, N2, tensors_A_masked, tensors_A_pos, x_r, xs_l_masked,
         # (do), (wo) -> (wd) : O(Nw D No)
         # (wd), (wdn) -> (dn) : O(Nw D Nl)
         y = y.reshape((num_w, num_o))
+        # O(Nw D No)
         tmp_wd = numpy.einsum('do, wo -> wd', numpy.conj(x_orb), y, optimize=True)
+        # O(Nw D Nl)
         tmp_dn = numpy.einsum('wd, wdn -> dn', tmp_wd, numpy.conj(tmp_wdn), optimize=True)
         return tmp_dn.ravel()
 
@@ -308,9 +273,7 @@ def __ridge_complex_lsqr(N1, N2, A, y, alpha, num_data=1, verbose=0, x0=None, at
     if is_enabled_MPI:
         if comm is None:
             raise RuntimeError("comm is None")
-    #r = lsqr(A, y.reshape((N1, num_data)), damp=numpy.sqrt(alpha), x0=x0, atol_r1norm=0.0, comm=comm)
     r = lsqr(A, y.reshape((N1, num_data)), damp=numpy.sqrt(alpha), x0=x0, atol_r1norm=atol, comm=comm)
-    #r = lsqr(A, y.reshape((N1, num_data)), damp=numpy.sqrt(alpha), x0=x0, atol_r1norm=atol)
     return r[0]
 
 def __normalize_tensor(tensor):
