@@ -180,6 +180,7 @@ class OvercompleteGFModel(object):
 
         reg = numpy.sum([squared_L2_norm(t) for t in x_tensors])
 
+        #print("debug ", target_ratio, squared_error, reg)
         self.alpha = target_ratio * squared_error/reg
 
         return self.alpha
@@ -283,7 +284,7 @@ def __normalize_tensor(tensor):
     norm = numpy.linalg.norm(tensor)
     return tensor/norm, norm
 
-def optimize_als(model, nite, rtol = 1e-5, verbose=0, optimize_alpha=-1, print_interval=20, comm=None, seed=1):
+def optimize_als(model, nite, rtol = 1e-5, verbose=0, random_init=True, optimize_alpha=-1, print_interval=20, comm=None, seed=1):
     """
     Alternating least squares
 
@@ -390,11 +391,12 @@ def optimize_als(model, nite, rtol = 1e-5, verbose=0, optimize_alpha=-1, print_i
         if verbose >= 2:
             print("rest : time ", t2-t1, t3-t2)
 
-    numpy.random.seed(seed)
-    model.x_r = numpy.random.rand(*model.x_r.shape) + 1J * numpy.random.rand(*model.x_r.shape)
-    for i in range(len(model.xs_l)):
-        model.xs_l[i] = numpy.random.rand(*model.xs_l[i].shape) + 1J*numpy.random.rand(*model.xs_l[i].shape)
-    model.x_orb = numpy.random.rand(*model.x_orb.shape) + 1J* numpy.random.rand(*model.x_orb.shape)
+    if random_init:
+        numpy.random.seed(seed)
+        model.x_r = numpy.random.rand(*model.x_r.shape) + 1J * numpy.random.rand(*model.x_r.shape)
+        for i in range(len(model.xs_l)):
+            model.xs_l[i] = numpy.random.rand(*model.xs_l[i].shape) + 1J*numpy.random.rand(*model.xs_l[i].shape)
+        model.x_orb = numpy.random.rand(*model.x_orb.shape) + 1J* numpy.random.rand(*model.x_orb.shape)
 
     if is_enabled_MPI:
         model.x_r = comm.bcast(model.x_r, root=0)
@@ -402,15 +404,18 @@ def optimize_als(model, nite, rtol = 1e-5, verbose=0, optimize_alpha=-1, print_i
             model.xs_l[i] = comm.bcast(model.xs_l[i], root=0)
         model.x_orb = comm.bcast(model.x_orb, root=0)
 
+    assert len(model.xs_l) == freq_dim
+    if numpy.prod([numpy.linalg.norm(x) for x in model.x_tensors()]) == 0:
+        raise RuntimeError("Some of tensors are zero at rank " + str(rank))
+
     def compute_residual():
         if is_enabled_MPI:
             se = comm.allreduce(model.se())
-            snorm = comm.allreduce(model.squared_norm())
             mse = se/(comm.allreduce(num_w) * num_o)
         else:
             se = model.se()
-            snorm = model.squared_norm()
             mse = se/(num_w * num_o)
+        snorm = model.squared_norm()
         return se, snorm, mse
 
     losss = []
@@ -434,18 +439,23 @@ def optimize_als(model, nite, rtol = 1e-5, verbose=0, optimize_alpha=-1, print_i
     for epoch in range(nite):
         sys.stdout.flush()
 
+        #print("debug A ", [numpy.linalg.norm(x) for x in model.x_tensors()])
         # Optimize r tensor
         t1 = time.time()
         update_r_tensor()
+
+        #print("debug B ", [numpy.linalg.norm(x) for x in model.x_tensors()])
 
         t2 = time.time()
         # Optimize the other tensors
         for pos in range(model.freq_dim):
             update_l_tensor(pos)
+            #print("debug C ", pos, [numpy.linalg.norm(x) for x in model.x_tensors()])
 
         t3 = time.time()
 
         update_orb_tensor()
+        #print("debug D ", [numpy.linalg.norm(x) for x in model.x_tensors()])
 
         t4 = time.time()
 
@@ -454,13 +464,9 @@ def optimize_als(model, nite, rtol = 1e-5, verbose=0, optimize_alpha=-1, print_i
         rmses.append(numpy.sqrt(mse))
         losss.append(se + model.alpha * snorm)
 
-        #d_res_norm = numpy.abs(numpy.sqrt(squared_errors[-1]) - numpy.sqrt(squared_errors[-2]))
-        #atol_lsqr = max(1e-2 * d_res_norm, 0.1 * rtol * norm_y)
-        #print("debug ", epoch, atol_lsqr)
-
         if epoch%print_interval == 0:
             if verbose > 0 and rank == 0:
-                print("epoch = ", epoch, " loss = ", losss[-1], " rmse = ", rmses[-1], " alpha = ", model.alpha)
+                print("epoch = ", epoch, " loss = ", losss[-1], " rmse = ", rmses[-1], " alpha = ", model.alpha, " snorm=", snorm)
 
         if len(rmses) > 2:
             if numpy.abs(rmses[-2] - rmses[-1]) < rtol * (norm_y/numpy.sqrt(num_w_tot)):
@@ -484,7 +490,7 @@ def optimize_als(model, nite, rtol = 1e-5, verbose=0, optimize_alpha=-1, print_i
     return info
 
 
-def optimize_l_bfgs(model, nite, verbose=0, optimize_alpha=-1, print_interval=20, comm=None, seed=1):
+def optimize_l_bfgs(model, nite, verbose=0, random_init=True, optimize_alpha=-1, print_interval=20, comm=None, seed=1):
     """
     L-BFGS
 
@@ -532,19 +538,23 @@ def optimize_l_bfgs(model, nite, verbose=0, optimize_alpha=-1, print_interval=20
     x_shapes = [(D,num_rep)] + [(D,linear_dim)] * freq_dim + [(D,num_o)]
     x_sizes = [numpy.prod(shape) for shape in x_shapes]
 
-    numpy.random.seed(seed)
-    model.x_r = numpy.random.rand(*model.x_r.shape) + 1J * numpy.random.rand(*model.x_r.shape)
-    for i in range(len(model.xs_l)):
-        model.xs_l[i] = numpy.random.rand(*model.xs_l[i].shape) + 1J*numpy.random.rand(*model.xs_l[i].shape)
-    model.x_orb = numpy.random.rand(*model.x_orb.shape) + 1J* numpy.random.rand(*model.x_orb.shape)
+    if random_init:
+        numpy.random.seed(seed)
+        model.x_r = numpy.random.rand(*model.x_r.shape) + 1J * numpy.random.rand(*model.x_r.shape)
+        for i in range(len(model.xs_l)):
+            model.xs_l[i] = numpy.random.rand(*model.xs_l[i].shape) + 1J*numpy.random.rand(*model.xs_l[i].shape)
+        model.x_orb = numpy.random.rand(*model.x_orb.shape) + 1J* numpy.random.rand(*model.x_orb.shape)
+        if is_enabled_MPI:
+            model.x_r = comm.bcast(model.x_r, root=0)
+            for i in range(len(model.xs_l)):
+                model.xs_l[i] = comm.bcast(model.xs_l[i], root=0)
+            model.x_orb = comm.bcast(model.x_orb, root=0)
+    #else:
+        #model.x_r = x0_tensors[0]
+        #model.xsl_l = x0_tensors[1:-1]
+        #model.x_orb = x0_tensors[-1]
 
     alpha = 1e-10
-
-    if is_enabled_MPI:
-        model.x_r = comm.bcast(model.x_r, root=0)
-        for i in range(len(model.xs_l)):
-            model.xs_l[i] = comm.bcast(model.xs_l[i], root=0)
-        model.x_orb = comm.bcast(model.x_orb, root=0)
 
     def _to_x_tensors(x):
         tmp = x.reshape((2, -1))
@@ -614,22 +624,33 @@ def optimize_l_bfgs(model, nite, verbose=0, optimize_alpha=-1, print_interval=20
             grad_se = grad_se_local(x)
         return grad_se + alpha * grad_snorm(x)
 
+    def callback(xk):
+        if optimize_alpha > 0:
+            reg = snorm(xk)
+            if is_enabled_MPI:
+                se = comm.allreduce(se_local(xk))
+            else:
+                se = se_local(xk)
+            alpha = optimize_alpha * se/reg
+            if rank == 0:
+                print("alpha = ", alpha)
+        sys.stdout.flush()
+
     x0_tensors = [model.x_r] + model.xs_l + [model.x_orb]
     x0 = _from_x_tensors(x0_tensors)
+
+    # Sanity check
     x0_tensors_reconst = _to_x_tensors(x0)
     for i in range(len(x0_tensors)):
         numpy.allclose(x0_tensors[i], x0_tensors_reconst[i])
 
-    t1 = time.time()
-    print(func(x0))
-    t2 = time.time()
-    print(grad_func(x0))
-    t3 = time.time()
-    print("func, grad : ", t2-t1, t3-t2)
-    res = minimize(fun=func, x0=x0, jac=grad_func, method="L-BFGS-B", options={'maxiter' : nite, 'disp': True})
+    disp = False
+    if rank == 0:
+        disp = True
+    res = minimize(fun=func, x0=x0, jac=grad_func, method="L-BFGS-B", options={'maxiter' : nite, 'disp': disp}, callback=callback)
 
     x_tensors = _to_x_tensors(res.x)
     model.x_r = x_tensors[0]
-    model.xsl_l = x_tensors[1:-1]
+    model.xs_l = x_tensors[1:-1]
     model.x_orb = x_tensors[-1]
     model.alpha = alpha

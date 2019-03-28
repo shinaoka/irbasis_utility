@@ -49,6 +49,8 @@ parser.add_argument('path_output_file', action='store', default=None, type=str, 
 parser.add_argument('--niter', default=20, type=int, help='Number of iterations')
 parser.add_argument('--D', default=1, type=int, help='Rank of decomposition')
 parser.add_argument('--Lambda', default=1000.0, type=float, help='Lambda')
+parser.add_argument('--restart', default=0, type=int, help='Restart or not')
+parser.add_argument('--method', default='als', type=str, help='als or l-bfgs')
 
 args = parser.parse_args()
 if os.path.isfile(args.path_input_file) is False:
@@ -101,7 +103,7 @@ sp_local = numpy.array(freqs)[start:end,:]
 sp_local = [tuple(sp_local[i,:]) for i in range(sp_local.shape[0])]
 
 # Regression
-def kruskal_complex_Ds(tensors_A, y, Ds, cutoff=1e-5):
+def kruskal_complex_Ds(tensors_A, y, Ds, cutoff=1e-5, x0_tensors=None):
     """
     
     Parameters
@@ -126,7 +128,19 @@ def kruskal_complex_Ds(tensors_A, y, Ds, cutoff=1e-5):
         if rank == 0:
             print("D ", D)
         model = OvercompleteGFModel(Nw, Nr, 3, num_o_nonzero, linear_dim, tensors_A, y[:, orb_idx], alpha_init, D)
-        info = optimize_l_bfgs(model, args.niter, verbose = 1, print_interval=1)
+        if not x0_tensors is None:
+            random_init = False
+            model.x_r = copy.deepcopy(x0_tensors[0])
+            model.xs_l = copy.deepcopy(x0_tensors[1:-1])
+            model.x_orb = copy.deepcopy(x0_tensors[-1][:, orb_idx])
+        else:
+            random_init = True
+        if args.method == 'l-bfgs':
+            info = optimize_l_bfgs(model, args.niter, verbose = 1, print_interval=1, random_init=random_init, optimize_alpha=1e-8)
+        elif args.method == 'als':
+            info = optimize_als(model, args.niter, rtol = 0, verbose = 1, print_interval=1, random_init=random_init, optimize_alpha=1e-8)
+        else:
+            raise RuntimeError("Unknown method!")
         xs = copy.deepcopy(model.x_tensors())
         x_orb_full = numpy.zeros((D, num_o), dtype=complex)
         x_orb_full[:, orb_idx] = xs[-1]
@@ -146,9 +160,18 @@ def construct_prj(sp):
 
 prj = construct_prj(sp_local)
 
-Ds = [args.D]
 y = G2iwn_local.transpose((1,0))
-coeffs_D, model_D = kruskal_complex_Ds(prj, y, Ds)
+
+x0_tensors = None
+if args.restart > 0:
+    x0_tensors = []
+    with h5py.File(args.path_output_file, 'r') as hf:
+        for i in range(5):
+            x0_tensors.append(hf['/D'+ str(args.D) + '/x' + str(i)][()])
+        #x0_tensors[-1] = x0_tensors[-1][:, orb_idx].copy()
+
+Ds = [args.D]
+coeffs_D, model_D = kruskal_complex_Ds(prj, y, Ds, x0_tensors=x0_tensors)
 
 if is_master_node:
     with h5py.File(args.path_output_file, 'a') as hf:
