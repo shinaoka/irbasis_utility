@@ -126,7 +126,7 @@ def kruskal_complex_Ds(tensors_A, y, Ds, cutoff=1e-5):
         if rank == 0:
             print("D ", D)
         model = OvercompleteGFModel(Nw, Nr, 3, num_o_nonzero, linear_dim, tensors_A, y[:, orb_idx], alpha_init, D)
-        info = optimize_als(model, args.niter, rtol = 1e-8, optimize_alpha=1e-8, verbose = 1, print_interval=1)
+        info = optimize_l_bfgs(model, args.niter, verbose = 1, print_interval=1)
         xs = copy.deepcopy(model.x_tensors())
         x_orb_full = numpy.zeros((D, num_o), dtype=complex)
         x_orb_full[:, orb_idx] = xs[-1]

@@ -40,5 +40,30 @@ class TestMethods(unittest.TestCase):
 
             self.assertLess(numpy.abs(info['losss'][-1] - info['losss'][-2])/numpy.abs(info['losss'][-2]), 1e-3)
 
+
+    def test_l_bfgs(self):
+        numpy.random.seed(100)
+
+        Nw = 50
+        Nr = 2
+        linear_dim = 5
+        D = 2
+        num_o = 1**4
+        alpha = 1e-10
+
+        def create_tensor_3(N, M, L):
+            rand = numpy.random.rand(N, M, L) + 1J * numpy.random.rand(N, M, L)
+            return rand
+
+        for freq_dim in [2,3]:
+            tensors_A = [create_tensor_3(Nw, Nr, linear_dim) for i in range(freq_dim)]
+            y = numpy.random.randn(Nw, num_o) + \
+                1J * numpy.random.randn(Nw, num_o)
+
+            numpy.random.seed(100)
+            model = OvercompleteGFModel(Nw, Nr, freq_dim, num_o, linear_dim, tensors_A, y, alpha, D)
+            info = optimize_l_bfgs(model, nite = 400, verbose=1)
+
+
 if __name__ == '__main__':
     unittest.main()

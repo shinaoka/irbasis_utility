@@ -44,11 +44,14 @@ def predict(prj, x_tensors):
     num_o = x_tensors[-1].shape[1]
 
     tmp_wrd = numpy.full((nw, R, D), complex(1.0))
+    # O(Nw R D Nl)
     for i in range(freq_dim):
         tmp_wrd *= numpy.einsum('wrl, dl -> wrd', prj[i], xs_l[i], optimize=True)
     t2 = time.time()
+    # O(Nw R D)
     tmp_wd = numpy.einsum('wrd, dr->wd', tmp_wrd, x_tensors[0], optimize=True)
     t3 = time.time()
+    # O(Nw D No)
     tmp_wo = numpy.einsum('wd, do->wo', tmp_wd, x_tensors[-1], optimize=True).reshape((nw, num_o))
     t4 = time.time()
     #print(t2-t1, t3-t2, t4-t3)
@@ -480,3 +483,144 @@ def optimize_als(model, nite, rtol = 1e-5, verbose=0, optimize_alpha=-1, print_i
 
     return info
 
+
+def optimize_l_bfgs(model, nite, verbose=0, optimize_alpha=-1, print_interval=20, comm=None, seed=1):
+    """
+    L-BFGS
+
+    Parameters
+    ----------
+    model:  object of OvercompleteGFModel
+        Model to be optimized
+
+    nite: int
+        Number of max iterations.
+
+    verbose: int
+        0, 1, 2
+
+    optimize_alpha: flaot
+        If a positive value is given, the value of the regularization parameter alpha is automatically determined.
+        (regularization term)/(squared norm of the residual) ~ optimize_alpha.
+
+    Returns
+    -------
+
+    """
+
+    import autograd.numpy as numpy  # Thinly-wrapped numpy
+    from autograd import grad  # The only autograd function you may ever need
+    from scipy.optimize import minimize
+
+    rank = 0
+    if comm is None and is_enabled_MPI:
+        comm = MPI.COMM_WORLD
+
+    if is_enabled_MPI:
+        rank = comm.Get_rank()
+
+    num_rep = model.num_rep
+    D = model.D
+    num_w = model.num_w
+    freq_dim = model.freq_dim
+    linear_dim = model.linear_dim
+    num_o = model.num_o
+    tensors_A = model.tensors_A
+    y = model.y
+    alpha = model.alpha
+
+    x_shapes = [(D,num_rep)] + [(D,linear_dim)] * freq_dim + [(D,num_o)]
+    x_sizes = [numpy.prod(shape) for shape in x_shapes]
+
+    numpy.random.seed(seed)
+    model.x_r = numpy.random.rand(*model.x_r.shape) + 1J * numpy.random.rand(*model.x_r.shape)
+    for i in range(len(model.xs_l)):
+        model.xs_l[i] = numpy.random.rand(*model.xs_l[i].shape) + 1J*numpy.random.rand(*model.xs_l[i].shape)
+    model.x_orb = numpy.random.rand(*model.x_orb.shape) + 1J* numpy.random.rand(*model.x_orb.shape)
+
+    if is_enabled_MPI:
+        model.x_r = comm.bcast(model.x_r, root=0)
+        for i in range(len(model.xs_l)):
+            model.xs_l[i] = comm.bcast(model.xs_l[i], root=0)
+        model.x_orb = comm.bcast(model.x_orb, root=0)
+
+    def _to_x_tensors(x):
+        tmp = x.reshape((2, -1))
+        x1d = tmp[0, :] + 1J * tmp[1, :]
+        offset = 0
+        x_tensors = []
+        for i in range(len(x_shapes)):
+            block = x1d[offset:offset+x_sizes[i]]
+            x_tensors.append(block.reshape(x_shapes[i]))
+            offset += x_sizes[i]
+        return x_tensors
+
+    def _from_x_tensors(x_tensors):
+        x1d = numpy.hstack([numpy.ravel(x) for x in x_tensors])
+        return numpy.hstack([x1d.real, x1d.imag])
+
+    def _predict(prj, x_tensors):
+        xs_l = x_tensors[1:-1]
+        freq_dim = len(prj)
+        t1 = time.time()
+
+        tmp_wrd = numpy.full((num_w, num_rep, D), complex(1.0))
+        # O(Nw R D Nl)
+        for i in range(freq_dim):
+            tmp_wrd *= numpy.einsum('wrl, dl -> wrd', prj[i], xs_l[i], optimize=True)
+        t2 = time.time()
+        # O(Nw R D)
+        tmp_wd = numpy.einsum('wrd, dr->wd', tmp_wrd, x_tensors[0], optimize=True)
+        t3 = time.time()
+        # O(Nw D No)
+        tmp_wo = numpy.einsum('wd, do->wo', tmp_wd, x_tensors[-1], optimize=True).reshape((num_w, num_o))
+        t4 = time.time()
+        # print(t2-t1, t3-t2, t4-t3)
+        return tmp_wo
+
+    def _squared_L2_norm(x):
+        x = x.ravel()
+        return numpy.real(numpy.dot(numpy.conj(x.transpose()), x))
+
+    def _compute_se(x_tensors):
+        y_pre = _predict(tensors_A, x_tensors)
+        return _squared_L2_norm(y - y_pre)
+
+    def _compute_snorm(x_tensors):
+        return numpy.sum([_squared_L2_norm(t) for t in x_tensors])
+
+    def se_local(x):
+        return _compute_se(_to_x_tensors(x))
+
+    def snorm(x):
+        return _compute_snorm(_to_x_tensors(x))
+
+    grad_se_local = grad(se_local)
+    grad_snorm = grad(snorm)
+
+    def func(x):
+        if is_enabled_MPI:
+            se = comm.allreduce(se_local(x))
+        else:
+            se = se_local(x)
+        return se + snorm(x)
+
+    def grad_func(x):
+        if is_enabled_MPI:
+            grad_se = comm.allreduce(grad_se_local(x))
+        else:
+            grad_se = grad_se_local(x)
+        return grad_se + grad_snorm(x)
+
+
+    alpha = 1e-10
+    x0 = _from_x_tensors([model.x_r] + model.xs_l + [model.x_orb])
+    print(func(x0))
+    print(grad_func(x0))
+    res = minimize(fun=func, x0=x0, jac=grad_func, method="L-BFGS-B", options={'maxiter' : nite, 'disp': True})
+
+    x_tensors = _to_x_tensors(res.x)
+    model.x_r = x_tensors[0]
+    model.xsl_l = x_tensors[1:-1]
+    model.x_orb = x_tensors[-1]
+    model.alpha = alpha
