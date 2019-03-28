@@ -132,12 +132,9 @@ def kruskal_complex_Ds(tensors_A, y, Ds, cutoff=1e-5):
         x_orb_full[:, orb_idx] = xs[-1]
         xs[-1] = x_orb_full
         coeffs_D.append(xs)
-        squared_errors_D.append(info['rmses'][-1]**2)
         model_D.append(model)
     
-    squared_errors_D = numpy.array(squared_errors_D)
-    
-    return coeffs_D, squared_errors_D, model_D
+    return coeffs_D, model_D
 
 def construct_prj(sp):
     n_sp = len(sp)
@@ -151,7 +148,7 @@ prj = construct_prj(sp_local)
 
 Ds = [args.D]
 y = G2iwn_local.transpose((1,0))
-coeffs_D, se_D, model_D = kruskal_complex_Ds(prj, y, Ds)
+coeffs_D, model_D = kruskal_complex_Ds(prj, y, Ds)
 
 if is_master_node:
     with h5py.File(args.path_output_file, 'a') as hf:

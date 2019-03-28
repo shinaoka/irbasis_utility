@@ -538,6 +538,8 @@ def optimize_l_bfgs(model, nite, verbose=0, optimize_alpha=-1, print_interval=20
         model.xs_l[i] = numpy.random.rand(*model.xs_l[i].shape) + 1J*numpy.random.rand(*model.xs_l[i].shape)
     model.x_orb = numpy.random.rand(*model.x_orb.shape) + 1J* numpy.random.rand(*model.x_orb.shape)
 
+    alpha = 1e-10
+
     if is_enabled_MPI:
         model.x_r = comm.bcast(model.x_r, root=0)
         for i in range(len(model.xs_l)):
@@ -603,20 +605,27 @@ def optimize_l_bfgs(model, nite, verbose=0, optimize_alpha=-1, print_interval=20
             se = comm.allreduce(se_local(x))
         else:
             se = se_local(x)
-        return se + snorm(x)
+        return se + alpha * snorm(x)
 
     def grad_func(x):
         if is_enabled_MPI:
             grad_se = comm.allreduce(grad_se_local(x))
         else:
             grad_se = grad_se_local(x)
-        return grad_se + grad_snorm(x)
+        return grad_se + alpha * grad_snorm(x)
 
+    x0_tensors = [model.x_r] + model.xs_l + [model.x_orb]
+    x0 = _from_x_tensors(x0_tensors)
+    x0_tensors_reconst = _to_x_tensors(x0)
+    for i in range(len(x0_tensors)):
+        numpy.allclose(x0_tensors[i], x0_tensors_reconst[i])
 
-    alpha = 1e-10
-    x0 = _from_x_tensors([model.x_r] + model.xs_l + [model.x_orb])
+    t1 = time.time()
     print(func(x0))
+    t2 = time.time()
     print(grad_func(x0))
+    t3 = time.time()
+    print("func, grad : ", t2-t1, t3-t2)
     res = minimize(fun=func, x0=x0, jac=grad_func, method="L-BFGS-B", options={'maxiter' : nite, 'disp': True})
 
     x_tensors = _to_x_tensors(res.x)
