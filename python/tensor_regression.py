@@ -451,8 +451,8 @@ def optimize_als(model, nite, rtol = 1e-5, verbose=0, optimize_alpha=-1, print_i
         rmses.append(numpy.sqrt(mse))
         losss.append(se + model.alpha * snorm)
 
-        d_res_norm = numpy.abs(numpy.sqrt(squared_errors[-1]) - numpy.sqrt(squared_errors[-2]))
-        atol_lsqr = max(1e-2 * d_res_norm, 0.1 * rtol * norm_y)
+        #d_res_norm = numpy.abs(numpy.sqrt(squared_errors[-1]) - numpy.sqrt(squared_errors[-2]))
+        #atol_lsqr = max(1e-2 * d_res_norm, 0.1 * rtol * norm_y)
         #print("debug ", epoch, atol_lsqr)
 
         if epoch%print_interval == 0:
