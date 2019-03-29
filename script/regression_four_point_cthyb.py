@@ -135,8 +135,8 @@ def kruskal_complex_Ds(tensors_A, y, Ds, cutoff=1e-5, x0_tensors=None):
             model.x_orb = copy.deepcopy(x0_tensors[-1][:, orb_idx])
         else:
             random_init = True
-        if args.method == 'l-bfgs':
-            info = optimize_l_bfgs(model, args.niter, verbose = 1, print_interval=1, random_init=random_init, optimize_alpha=1e-8)
+        if args.method == 'l-bfgs' or args.method == 'ls':
+            info = optimize_grad(model, args.niter, method=args.method, verbose = 1, print_interval=1, random_init=random_init, optimize_alpha=1e-8)
         elif args.method == 'als':
             info = optimize_als(model, args.niter, rtol = 0, verbose = 1, print_interval=1, random_init=random_init, optimize_alpha=1e-8)
         else:

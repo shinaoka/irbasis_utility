@@ -3,6 +3,7 @@ from __future__ import print_function
 import sys
 import numpy
 from scipy.sparse.linalg import LinearOperator
+from scipy.optimize import OptimizeResult
 
 from itertools import compress
 import time
@@ -489,8 +490,54 @@ def optimize_als(model, nite, rtol = 1e-5, verbose=0, random_init=True, optimize
 
     return info
 
+def minimize_ls(fun, x0, jac, options, callback):
+    maxiter = options['maxiter']
+    disp = options['disp']
 
-def optimize_l_bfgs(model, nite, verbose=0, random_init=True, optimize_alpha=-1, print_interval=20, comm=None, seed=1):
+    amp_fac = 2.0
+
+    #eta = 1e-5
+    #gamma = 0.0
+
+    xk = x0.copy()
+    dx = 0.0 * xk
+    
+    for iter in range(maxiter):
+        fun_xk = fun(xk)
+
+        grad = jac(xk)
+        eta = 1.0
+        while True:
+            x_new = xk - eta * grad
+            fun_x_new = fun(x_new)
+            #print("debug ", fun_x_new, fun_xk, eta)
+            if fun_x_new < fun_xk:
+                break
+            eta *= 0.1
+
+        if disp:
+            print("Iter {} :  func= {} eta= {}".format(iter, fun_xk, eta))
+        callback(xk)
+
+        xk = x_new.copy()
+
+        #if iter > 0:
+            #if fun_xk > fun_xkm1:
+                #eta /= amp_fac
+                #xk = xkm1.copy()
+                #fun_xk = fun_xkm1
+            #else:
+                #eta *= amp_fac
+
+        #xkm1 = xk.copy()
+        #fun_xkm1 = fun_xk
+        #xk += - eta * jac(xk)
+
+    res = OptimizeResult()
+    res.x = xk
+    return res
+
+def optimize_grad(model, nite, method='l-bfgs', verbose=0, random_init=True, optimize_alpha=-1, print_interval=20, comm=None, seed=1, learning_rate=None):
     """
     L-BFGS
 
@@ -647,7 +694,12 @@ def optimize_l_bfgs(model, nite, verbose=0, random_init=True, optimize_alpha=-1,
     disp = False
     if rank == 0:
         disp = True
-    res = minimize(fun=func, x0=x0, jac=grad_func, method="L-BFGS-B", options={'maxiter' : nite, 'disp': disp}, callback=callback)
+    if method == 'l-bfgs':
+        res = minimize(fun=func, x0=x0, jac=grad_func, method="L-BFGS-B", options={'maxiter' : nite, 'disp': disp}, callback=callback)
+    elif method=='ls':
+        res = minimize_ls(fun=func, x0=x0, jac=grad_func, options={'maxiter' : nite, 'learning_rate' : learning_rate, 'disp': disp}, callback=callback)
+    else:
+        raise RuntimeError("Unknown method")
 
     x_tensors = _to_x_tensors(res.x)
     model.x_r = x_tensors[0]
