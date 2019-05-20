@@ -40,5 +40,23 @@ class TestMethods(unittest.TestCase):
                 print(s)
             self.assertLessEqual(cond_num, 1000)
 
+    def test_sampling_point_tau(self):
+        for stat in ['F', 'B']:
+            if stat == 'barB':
+                b = Basis(augmented_basis_b(Lambda), beta)
+            else:
+                b = Basis(irbasis.load(stat, Lambda), beta)
+
+            dim = b.dim
+            whichl = dim - 1
+            sp = sampling_points_tau(b, whichl)
+            Utaul = numpy.array([b.Ultau(l, tau) for l in range(dim) for tau in sp]).reshape((dim, dim))
+            Utaul_real = from_complex_to_real_coeff_matrix(Utaul)
+            U, S, Vh = scipy.linalg.svd(Utaul_real, full_matrices=False)
+            cond_num = S[0] / S[-1]
+
+            print("cond_num ", cond_num)
+            self.assertLessEqual(cond_num, 1000)
+
 if __name__ == '__main__':
     unittest.main()

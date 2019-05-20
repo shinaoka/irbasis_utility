@@ -55,7 +55,7 @@ class augmented_basis_b(object):
             return self._bb.ulx(l-2, x)
 
     def ulx_all_l(self, x):
-        r = numpy.zeros((dim_))
+        r = numpy.zeros((self._dim))
         r[0] = numpy.sqrt(0.5)
         r[1] = numpy.sqrt(1.5) * x
         r[2:] = self._bb.ulx_all_l(x)
@@ -159,6 +159,10 @@ class Basis(object):
             self._Unl_cache[nvec_compt[i]] = numpy.sqrt(self._beta) * unl[i,:self._dim]
 
     def compute_Unl(self, nvec, auto_compute=True):
+        # shortcut
+        if len(nvec)==1 and nvec[0] in self._Unl_cache:
+            return self._Unl_cache[nvec[0]].reshape((1, -1))
+
         if auto_compute:
             self._precompute_Unl(nvec)
         num_n = len(nvec)
@@ -197,6 +201,40 @@ def sampling_points_leggauss(basis_beta, whichl, deg):
     x, y = composite_leggauss(deg, section_edges)
 
     return tau_for_x(x, basis_beta.beta), .5 * basis_beta.beta * y
+
+def _funique(x, tol=2e-16):
+    """Removes duplicates from an 1D array within tolerance"""
+    x = numpy.sort(x)
+    unique = numpy.ediff1d(x, to_end=2*tol) > tol
+    x = x[unique]
+    return x
+
+def _find_roots(ulx_data, xoffset, tol=2e-16):
+    """Find all roots in the piecewise polynomial representation"""
+    nsec, npoly = ulx_data.shape
+    if xoffset.shape != (nsec+1,):
+        raise ValueError("Invalid section edges shape")
+
+    xsegm = xoffset[1:] - xoffset[:-1]
+    roots = []
+    for i in range(nsec):
+        x0s = numpy.roots(ulx_data[i, ::-1])
+        x0s = [(x0 + xoffset[i]).real for x0 in x0s
+               if -tol < x0 < xsegm[i]+tol and numpy.abs(x0.imag) < tol]
+        roots += x0s
+
+    roots = numpy.asarray(roots)
+    roots = numpy.hstack((-roots[::-1], roots))
+    roots = _funique(roots, tol)
+    return roots
+
+def sampling_points_x(basis_xy, whichl):
+    xroots =  _find_roots(basis_xy._ulx_data[whichl], basis_xy._ulx_section_edges, 1e-9)
+    xroots_ex = numpy.hstack((-1.0, xroots, 1.0))
+    return 0.5 * (xroots_ex[:-1] + xroots_ex[1:])
+
+def sampling_points_tau(basis_beta, whichl):
+    return 0.5 * basis_beta.beta * (sampling_points_x(basis_beta.basis_xy, whichl) + 1)
 
 def sampling_points_matsubara(basis_beta, whichl):
     """
