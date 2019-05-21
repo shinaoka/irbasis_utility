@@ -22,7 +22,7 @@ setup(
 
     long_description_content_type='text/markdown',
 
-    url='https://github.com/SpM-lab/irbasis_utility',
+    url='https://github.com/shinaoka/irbasis_utility',
 
     author='Hiroshi Shinaoka, Markus Wallerberger, Dominique Geffroy',
 
