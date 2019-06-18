@@ -44,11 +44,14 @@ def predict(prj, x_tensors):
     num_o = x_tensors[-1].shape[1]
 
     tmp_wrd = numpy.full((nw, R, D), complex(1.0))
+    # O(Nw R D Nl)
     for i in range(freq_dim):
         tmp_wrd *= numpy.einsum('wrl, dl -> wrd', prj[i], xs_l[i], optimize=True)
     t2 = time.time()
+    # O(Nw R D)
     tmp_wd = numpy.einsum('wrd, dr->wd', tmp_wrd, x_tensors[0], optimize=True)
     t3 = time.time()
+    # O(Nw D No)
     tmp_wo = numpy.einsum('wd, do->wo', tmp_wd, x_tensors[-1], optimize=True).reshape((nw, num_o))
     t4 = time.time()
     #print(t2-t1, t3-t2, t4-t3)
@@ -236,34 +239,52 @@ def linear_operator_l(N1, N2, tensors_A_masked, tensors_A_pos, x_r, xs_l_masked,
     D = x_r.shape[0]
     num_o = x_orb.shape[1]
 
+    t1 = time.time()
+
     # O(Nw D R Nl)
     tmp_wrd1 = numpy.full((num_w, R, D), complex(1.0))
     for i in range(freq_dim-1):
         tmp_wrd1 *= numpy.einsum('wrl, dl -> wrd', tensors_A_masked[i], xs_l_masked[i], optimize=True)
     tmp_wrd1 = numpy.einsum('wrd, dr->wrd', tmp_wrd1, x_r, optimize=True)
     tmp_wdn = numpy.einsum('wrd, wrn->wdn', tmp_wrd1, tensors_A_pos, optimize=True)
+
+    t2 = time.time()
    
     def matvec(x):
         # x                 dn
         # tensors_A_pos     wrn
         #   ===> wrd
         # x_orb             do
+        t1 = time.time()
         x = x.reshape((D, linear_dim))
         # O(Nw D Nl)
-        tmp_wd = numpy.einsum('dn, wdn -> wd', x, tmp_wdn, optimize=True)
+        # 'dn, wdn -> wd'
+        tmp_wd = numpy.sum(x[None, :, :] * tmp_wdn, axis=2)
+        t2 = time.time()
         # O(Nw D No)
-        tmp_wo = numpy.einsum('wd, do -> wo', tmp_wd, x_orb, optimize=True).ravel()
+        #  'wd, do -> wo'
+        tmp_wo = numpy.dot(tmp_wd, x_orb).ravel()
+        t3 = time.time()
+        #if MPI.COMM_WORLD.Get_rank() == 0:
+            #print("debug A", MPI.COMM_WORLD.Get_rank(), t2-t1, t3-t2, tmp_wd.shape, x_orb.shape)
         return tmp_wo
 
     def rmatvec(y):
         # (wdn), (do), (wo) -> (dn)
         # (do), (wo) -> (wd) : O(Nw D No)
         # (wd), (wdn) -> (dn) : O(Nw D Nl)
+        t1 = time.time()
         y = y.reshape((num_w, num_o))
         # O(Nw D No)
-        tmp_wd = numpy.einsum('do, wo -> wd', numpy.conj(x_orb), y, optimize=True)
+        #  Equivalent to tmp_wd = numpy.einsum('do, wo -> wd', numpy.conj(x_orb), y, optimize=True)
+        tmp_wd = numpy.dot(y, numpy.conj(x_orb).transpose())
+        t2 = time.time()
         # O(Nw D Nl)
-        tmp_dn = numpy.einsum('wd, wdn -> dn', tmp_wd, numpy.conj(tmp_wdn), optimize=True)
+        #  Equivalent to tmp_dn = numpy.einsum('wd, wdn -> dn', tmp_wd, numpy.conj(tmp_wdn), optimize=True)
+        tmp_dn = numpy.sum(tmp_wd[:,:,None] * numpy.conj(tmp_wdn), axis=0)
+        t3 = time.time()
+        #if MPI.COMM_WORLD.Get_rank() == 0:
+            #print("debug B", MPI.COMM_WORLD.Get_rank(), t2-t1, t3-t2)
         return tmp_dn.ravel()
 
     return LinearOperator((N1, N2), matvec=matvec, rmatvec=rmatvec)
@@ -274,6 +295,8 @@ def __ridge_complex_lsqr(N1, N2, A, y, alpha, num_data=1, verbose=0, x0=None, at
         if comm is None:
             raise RuntimeError("comm is None")
     r = lsqr(A, y.reshape((N1, num_data)), damp=numpy.sqrt(alpha), x0=x0, atol_r1norm=atol, comm=comm)
+    #if comm.Get_rank() == 0:
+        #print("N ite", r[2])
     return r[0]
 
 def __normalize_tensor(tensor):
@@ -470,7 +493,7 @@ def optimize_als(model, nite, rtol = 1e-5, verbose=0, optimize_alpha=-1, print_i
         t5 = time.time()
 
         if rank == 0:
-            print(t2-t1, t3-t2, t4-t3, t5-t4)
+            print(' timings: ', t2-t1, t3-t2, t4-t3, t5-t4)
 
         sys.stdout.flush()
 
