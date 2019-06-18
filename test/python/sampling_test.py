@@ -6,7 +6,7 @@ import irbasis
 from irbasis_util.two_point_basis import *
 from irbasis_util.internal import *
 
-Lambda = 10000.0
+Lambda = 1E+7
 beta = 100.0
 wmax = Lambda/beta
 
@@ -32,13 +32,7 @@ class TestMethods(unittest.TestCase):
             cond_num = S[0] / S[-1]
 
             print("cond_num ", cond_num)
-            print(sp)
-            print(Unl.shape)
-            print(U[:, -1])
-            print(Vh.T[:, -1])
-            for s in S:
-                print(s)
-            self.assertLessEqual(cond_num, 1000)
+            self.assertLessEqual(cond_num, 1E+4)
 
     def test_sampling_point_tau(self):
         for stat in ['F', 'B']:
@@ -56,7 +50,7 @@ class TestMethods(unittest.TestCase):
             cond_num = S[0] / S[-1]
 
             print("cond_num ", cond_num)
-            self.assertLessEqual(cond_num, 1000)
+            self.assertLessEqual(cond_num, 1E+4)
 
 if __name__ == '__main__':
     unittest.main()

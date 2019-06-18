@@ -229,7 +229,7 @@ def _find_roots(ulx_data, xoffset, tol=2e-16):
     return roots
 
 def sampling_points_x(basis_xy, whichl):
-    xroots =  _find_roots(basis_xy._ulx_data[whichl], basis_xy._ulx_section_edges, 1e-9)
+    xroots =  _find_roots(basis_xy._ulx_data[whichl], basis_xy._ulx_section_edges, 1e-8)
     xroots_ex = numpy.hstack((-1.0, xroots, 1.0))
     return 0.5 * (xroots_ex[:-1] + xroots_ex[1:])
 

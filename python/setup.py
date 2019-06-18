@@ -14,7 +14,7 @@ with open(path.join(here, 'README.md'), encoding='utf-8') as f:
 setup(
     name='irbasis utility',
 
-    version='0.2',
+    version='0.4',
 
     description='Utility python libraries for irbasis',
 
@@ -56,5 +56,5 @@ setup(
 
     packages = find_packages(exclude=['contrib', 'docs', 'tests']),
 
-    install_requires=['scipy', 'irbasis>=1.0.2'],
+    install_requires=['scipy', 'irbasis>=1.0.4'],
 )
