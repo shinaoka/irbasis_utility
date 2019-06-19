@@ -25,6 +25,7 @@ class TestMethods(unittest.TestCase):
             dim = b.dim - 4
             whichl = dim - 1
             sp = sampling_points_matsubara(b, whichl)
+            assert len(sp) == whichl+1
 
             Unl = b.compute_Unl(sp)[:, :dim]
             Unl_real = from_complex_to_real_coeff_matrix(Unl)
@@ -44,6 +45,7 @@ class TestMethods(unittest.TestCase):
             dim = b.dim
             whichl = dim - 1
             sp = sampling_points_tau(b, whichl)
+            assert len(sp) == whichl+1
             Utaul = numpy.array([b.Ultau(l, tau) for l in range(dim) for tau in sp]).reshape((dim, dim))
             Utaul_real = from_complex_to_real_coeff_matrix(Utaul)
             U, S, Vh = scipy.linalg.svd(Utaul_real, full_matrices=False)
