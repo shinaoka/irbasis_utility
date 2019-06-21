@@ -680,7 +680,7 @@ def optimize_grad(model, nite, method='l-bfgs', verbose=0, random_init=True, opt
                 se = se_local(xk)
             alpha = optimize_alpha * se/reg
             if rank == 0:
-                print("alpha = ", alpha)
+                print("alpha= ", alpha, " se= ", se)
         sys.stdout.flush()
 
     x0_tensors = [model.x_r] + model.xs_l + [model.x_orb]
@@ -696,6 +696,8 @@ def optimize_grad(model, nite, method='l-bfgs', verbose=0, random_init=True, opt
         disp = True
     if method == 'l-bfgs':
         res = minimize(fun=func, x0=x0, jac=grad_func, method="L-BFGS-B", options={'maxiter' : nite, 'disp': disp}, callback=callback)
+    elif method == 'CG':
+        res = minimize(fun=func, x0=x0, jac=grad_func, method="CG", options={'maxiter' : nite, 'disp': disp}, callback=callback)
     elif method=='ls':
         res = minimize_ls(fun=func, x0=x0, jac=grad_func, options={'maxiter' : nite, 'learning_rate' : learning_rate, 'disp': disp}, callback=callback)
     else:
