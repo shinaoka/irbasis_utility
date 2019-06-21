@@ -135,10 +135,17 @@ class FourPointPHView(object):
                 M[2, s1, s2, :, :] = self._get_Usol(s1, o2 + sign * o1)[:, None] * self._get_Usol(s2, o1)[None, :]
             return M
 
-    def sampling_points_matsubara(self, whichl, full_freqs=True):
+    def sampling_points_matsubara(self, whichl, full_freqs=True, target_repr=None):
         """
         Return sampling points in two-fermion-frequency convention
+
+        target_repr must be a list of tupe (int, int).
+        If target_repr is None, sampling points are generated for all representations.
+        Otherwise, sampling points are generated only for specified representation(s).
+        For instance, each element in target_repr must be (s, s', r)  (s, s'=0,1, r=0,1,2).
         """
+        assert target_repr is None or isinstance(target_repr, list)
+
         sp_o_f = 2 * sampling_points_matsubara(self._Bf, whichl) + 1
         sp_o_b = 2 * sampling_points_matsubara(self._Bb, whichl)
         sp_o = []
@@ -149,13 +156,16 @@ class FourPointPHView(object):
             if full_freqs:
                 for i, j in product(range(Nf), repeat=2):
                     # Fermion, Fermion
-                    sp_o.append((sp_o_f[i] - s1 * self._o, sp_o_f[j] - s2 * self._o))
+                    if target_repr is None or (s1, s2, 0) in target_repr:
+                        sp_o.append((sp_o_f[i] - s1 * self._o, sp_o_f[j] - s2 * self._o))
                 for i, j in product(range(Nb), range(Nf)):
                     # Boson, Fermion
                     o2 = sp_o_f[j] - s2 * self._o
                     o1 = sp_o_b[i] - s1 * self._o + _sign(s1) * o2
-                    sp_o.append((o1, o2))
-                    sp_o.append((o2, o1))
+                    if target_repr is None or (s1, s2, 1) in target_repr:
+                        sp_o.append((o1, o2))
+                    if target_repr is None or (s1, s2, 2) in target_repr:
+                        sp_o.append((o2, o1))
             else:
                 mini_f = [ Nf //2 - 1,  Nf //2]
                 mini_b = [ Nb //2 ]
