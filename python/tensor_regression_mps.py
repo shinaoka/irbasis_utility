@@ -76,36 +76,33 @@ def predict(prj, x_tensors, path=None):
     freq_dim = len(prj)
     assert len(x_tensors) == freq_dim+2
 
-    if freq_dim == 2:
-        #subscripts = 'wrl,wrm, Ar,ABl,BCm,Co -> wo'
-        Ux = []
-        for i in range(freq_dim):
-            # (wrl, ABl) -> (wrAB)
-            Ux.append(
-                numpy.tensordot(prj[i], x_tensors[i+1], axes=([2],[2]))
-            )
+    #subscripts = 'wrl,wrm, Ar,ABl,BCm,Co -> wo'
 
-        # Ux contains (wrAB, wrBC)
-        # (Ar, wrAB)->(wrAB)
-        tmp = numpy.transpose(x_tensors[0])[None,:,:,None] * Ux[0]
+    # Ux contains (wrAB, wrBC)
+    Ux = []
+    for i in range(freq_dim):
+        # (wrl, ABl) -> (wrAB)
+        Ux.append(numpy.tensordot(prj[i], x_tensors[i+1], axes=([2],[2])))
 
-        # wrAB->wrB
-        Ux[0] = numpy.sum(tmp, axis=2)
+    # (Ar, wrAB)->(wrAB)
+    tmp = numpy.transpose(x_tensors[0])[None,:,:,None] * Ux[0]
 
-        # (wrB) * (wrBC) -> (wrC)
-        #tmp = numpy.tensordot(Ux[0], Ux[1], axes=([2], [2]))
-        tmp = numpy.sum(Ux[0][:,:,:,None] * Ux[1], axis=2)
+    # wrAB -> wrB
+    Ux[0] = numpy.sum(tmp, axis=2)
 
-        # wrC -> wC
-        tmp2 = numpy.sum(tmp, axis=1)
+    # (wrB) * (wrBC) -> (wrC)
+    tmp = numpy.sum(Ux[0][:,:,:,None] * Ux[1], axis=2)
+    if freq_dim==3:
+        # (wrC) * (wrCD) -> (wrD) [only if freq_dim==3]
+        tmp = numpy.sum(tmp[:,:,:,None] * Ux[2], axis=2)
 
-        #(wC, Co) -> wo
-        tmp3 = numpy.dot(tmp2, x_tensors[-1])
+    # wrC -> wC
+    tmp2 = numpy.sum(tmp, axis=1)
 
-        return tmp3, None
+    #(wC, Co) -> wo
+    tmp3 = numpy.dot(tmp2, x_tensors[-1])
 
-    elif freq_dim == 3:
-        raise RuntimeError("Invalid freq_dim")
+    return tmp3, None
 
 
 def fit(y, prj, D, nite, rtol = 1e-5, verbose=0, random_init=True, optimize_alpha=-1, print_interval=20, comm=None, seed=1):
@@ -141,7 +138,6 @@ def fit(y, prj, D, nite, rtol = 1e-5, verbose=0, random_init=True, optimize_alph
     """
     from scipy.optimize import minimize
     from numpy import random
-    #import opt_einsum as oe
 
     rank = 0
     if comm is None and is_enabled_MPI:
@@ -155,7 +151,7 @@ def fit(y, prj, D, nite, rtol = 1e-5, verbose=0, random_init=True, optimize_alph
     num_o = y.shape[1]
 
     # Over all processess
-    num_w_all = comm.allreduce(num_w) if is_enabled_MPI else num_w
+    #num_w_all = comm.allreduce(num_w) if is_enabled_MPI else num_w
 
     assert y.shape[0] == num_w
     assert y.shape[1] == num_o
@@ -235,25 +231,7 @@ def fit(y, prj, D, nite, rtol = 1e-5, verbose=0, random_init=True, optimize_alph
         sys.stdout.flush()
 
     x0 = _from_x_tensors(x_tensors)
-    # Initial loss, optimal path is constructed
-
-    loss0 = loss(x0)
     grad_loss = grad(loss)
-
-    #t1 = time.time()
-    #loss0 = loss(x0)
-    #t2 = time.time()
-    #dloss0 = grad_loss(x0)
-    #t3 = time.time()
-    #print("timings ", t2-t1, t3-t2)
-
-    #dx0 = grad_loss(x0)
-    #print(x0)
-    #for i,x in enumerate(dx0):
-        #print(i,x)
-    #print(loss(x0))
-    #for s in [0, 1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2]:
-         #print(s, loss(x0 - s*dx0) -loss(x0))
 
     res = minimize(fun=loss, x0=x0, jac=grad_loss, method="L-BFGS-B", options={'maxiter': nite, 'disp': True},
                    callback=callback)
