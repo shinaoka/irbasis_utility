@@ -229,12 +229,68 @@ def _find_roots(ulx_data, xoffset, tol=2e-16):
     return roots
 
 def sampling_points_x(basis_xy, whichl):
-    xroots =  _find_roots(basis_xy._ulx_data[whichl], basis_xy._ulx_section_edges, 1e-9)
+    xroots =  _find_roots(basis_xy._ulx_data[whichl], basis_xy._ulx_section_edges, 1e-8)
     xroots_ex = numpy.hstack((-1.0, xroots, 1.0))
     return 0.5 * (xroots_ex[:-1] + xroots_ex[1:])
 
 def sampling_points_tau(basis_beta, whichl):
     return 0.5 * basis_beta.beta * (sampling_points_x(basis_beta.basis_xy, whichl) + 1)
+
+def _start_guesses(n=1000):
+    "Construct points on a logarithmically extended linear interval"
+    x1 = numpy.arange(n)
+    x2 = numpy.array(numpy.exp(numpy.linspace(numpy.log(n), numpy.log(1E+8), n)), dtype=int)
+    x = numpy.unique(numpy.hstack((x1,x2)))
+    return x
+
+def _get_unl_real(basis_xy, x):
+    "Return highest-order basis function on the Matsubara axis"
+    unl = basis_xy.compute_unl(x)
+    result = numpy.zeros(unl.shape, float)
+
+    # Purely real functions
+    real_loc = 1 if basis_xy.statistics == 'F' else 0
+    assert numpy.allclose(unl[:, real_loc::2].imag, 0)
+    result[:, real_loc::2] = unl[:, real_loc::2].real
+
+    # Purely imaginary functions
+    imag_loc = 1 - real_loc
+    assert numpy.allclose(unl[:, imag_loc::2].real, 0)
+    result[:, imag_loc::2] = unl[:, imag_loc::2].imag
+    return result
+
+def _sampling_points(fn):
+    "Given a discretized 1D function, return the location of the extrema"
+    fn = numpy.asarray(fn)
+    fn_abs = numpy.abs(fn)
+    sign_flip = fn[1:] * fn[:-1] < 0
+    sign_flip_bounds = numpy.hstack((0, sign_flip.nonzero()[0] + 1, fn.size))
+    points = []
+    for segment in map(slice, sign_flip_bounds[:-1], sign_flip_bounds[1:]):
+        points.append(fn_abs[segment].argmax() + segment.start)
+    return numpy.asarray(points)
+
+def _full_interval(sample, stat):
+    if stat == 'F':
+        return numpy.hstack((-sample[::-1]-1, sample))
+    else:
+        # If we have a bosonic basis and even order (odd maximum), we have a
+        # root at zero. We have to artifically add that zero back, otherwise
+        # the condition number will blow up.
+        if sample[0] == 0:
+            sample = sample[1:]
+        return numpy.hstack((-sample[::-1], 0, sample))
+
+def get_mats_sampling(basis_xy, lmax=None):
+    "Generate Matsubara sampling points from extrema of basis functions"
+    if lmax is None: lmax = basis_xy.dim()-1
+
+    x = _start_guesses()
+    y = _get_unl_real(basis_xy, x)[:,lmax]
+    x_idx = _sampling_points(y)
+
+    sample = x[x_idx]
+    return _full_interval(sample, basis_xy.statistics)
 
 def sampling_points_matsubara(basis_beta, whichl):
     """
@@ -254,6 +310,7 @@ def sampling_points_matsubara(basis_beta, whichl):
 
     """
     check_type(basis_beta, Basis)
+
     basis = basis_beta.basis_xy
     stat = basis.statistics
     beta = basis_beta.beta
@@ -267,30 +324,7 @@ def sampling_points_matsubara(basis_beta, whichl):
     if whichl_t > basis_beta.max_l:
         raise RuntimeError("Too large whichl")
 
-    x1 = numpy.arange(1000)
-    x2 = numpy.array(numpy.exp(numpy.linspace(numpy.log(1000), numpy.log(1E+8), 1000)), dtype=int)
-    x = numpy.unique(numpy.hstack((x1, x2)))
-    unl = basis.compute_unl(x)
-
-    shift = 0 if stat=='F' else 1
-    if ((whichl_t + shift) % 2 == 0):
-        y = numpy.sqrt(beta) * unl[:, whichl_t].imag
-    else:
-        y = numpy.sqrt(beta) * unl[:, whichl_t].real
-
-    sign_change = [(x[i], x[i+1], y[i+1], i) for i in range(len(x) - 1) if y[i] * y[i+1] <= 0]
-    zeros = numpy.array([0.5 * (p[0] + p[1]) for p in sign_change])
-    zero_mids = numpy.array([0.5*(zeros[i] + zeros[i+1]) for i in range(len(zeros) - 1)], dtype=int)
-
-    # Find the point where abs(y) takes a maximum value after the last sign change.
-    one_after_last_sign_change = sign_change[-1][3]
-    last_sampling_point = x[one_after_last_sign_change + numpy.argmax(numpy.abs(y[one_after_last_sign_change:]))]
-    sp_half = numpy.hstack(([0], zero_mids, [last_sampling_point]))
-    if stat == 'F':
-        r = numpy.sort(numpy.hstack((sp_half, -sp_half - 1)))
-    else:
-        r = numpy.unique(numpy.hstack((sp_half, -sp_half)))
-    return r
+    return get_mats_sampling(basis, whichl_t)
 
 def Gl_pole(B, pole):
     assert isinstance(B, Basis)

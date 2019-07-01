@@ -6,7 +6,7 @@ import irbasis
 from irbasis_util.two_point_basis import *
 from irbasis_util.internal import *
 
-Lambda = 10000.0
+Lambda = 1E+7
 beta = 100.0
 wmax = Lambda/beta
 
@@ -25,6 +25,7 @@ class TestMethods(unittest.TestCase):
             dim = b.dim - 4
             whichl = dim - 1
             sp = sampling_points_matsubara(b, whichl)
+            assert len(sp) == whichl+1
 
             Unl = b.compute_Unl(sp)[:, :dim]
             Unl_real = from_complex_to_real_coeff_matrix(Unl)
@@ -32,13 +33,7 @@ class TestMethods(unittest.TestCase):
             cond_num = S[0] / S[-1]
 
             print("cond_num ", cond_num)
-            print(sp)
-            print(Unl.shape)
-            print(U[:, -1])
-            print(Vh.T[:, -1])
-            for s in S:
-                print(s)
-            self.assertLessEqual(cond_num, 1000)
+            self.assertLessEqual(cond_num, 1E+4)
 
     def test_sampling_point_tau(self):
         for stat in ['F', 'B']:
@@ -50,13 +45,14 @@ class TestMethods(unittest.TestCase):
             dim = b.dim
             whichl = dim - 1
             sp = sampling_points_tau(b, whichl)
+            assert len(sp) == whichl+1
             Utaul = numpy.array([b.Ultau(l, tau) for l in range(dim) for tau in sp]).reshape((dim, dim))
             Utaul_real = from_complex_to_real_coeff_matrix(Utaul)
             U, S, Vh = scipy.linalg.svd(Utaul_real, full_matrices=False)
             cond_num = S[0] / S[-1]
 
             print("cond_num ", cond_num)
-            self.assertLessEqual(cond_num, 1000)
+            self.assertLessEqual(cond_num, 1E+4)
 
 if __name__ == '__main__':
     unittest.main()
