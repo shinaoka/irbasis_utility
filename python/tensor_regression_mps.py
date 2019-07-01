@@ -211,14 +211,29 @@ def fit(y, prj, D, nite, verbose=0, random_init=True, optimize_alpha=-1, comm=No
         else:
             return _snorm_local(x_tensors)
 
-    def _loss(x_tensors):
-        """
-        Cost function
-        """
-        return _se_mpi(x_tensors) + alpha * _snorm_mpi(x_tensors)
+    #def _loss(x_tensors):
+        #"""
+        #Cost function
+        #"""
+        #return _se_mpi(x_tensors) + alpha * _snorm_mpi(x_tensors)
 
+    def loss_local(x):
+        x_tensors = _to_x_tensors(x)
+        return _se_local(x_tensors) + alpha * _snorm_local(x_tensors) / comm.Get_size()
+
+    grad_loss_local = grad(loss_local)
+        
     def loss(x):
-        return _loss(_to_x_tensors(x))
+        if is_enabled_MPI:
+            return comm.allreduce(loss_local(x))
+        else:
+            return loss_local(x)
+
+    def grad_loss(x):
+        if is_enabled_MPI:
+            return comm.allreduce(grad_loss_local(x))
+        else:
+            return grad_loss_local(x)
 
     def callback(xk):
         if optimize_alpha > 0:
@@ -227,13 +242,20 @@ def fit(y, prj, D, nite, verbose=0, random_init=True, optimize_alpha=-1, comm=No
             se = _se_mpi(x_tensors)
             alpha = optimize_alpha * se/reg
             if rank == 0:
+                #print("debug ", rank, numpy.linalg.norm(x_tensors[0]))
                 print("alpha = ", alpha)
         sys.stdout.flush()
 
     x0 = _from_x_tensors(x_tensors)
-    grad_loss = grad(loss)
+    t1 = time.time()
+    loss0 = loss(x0)
+    t2 = time.time()
+    grad_loss0 = grad_loss(x0)
+    t3 = time.time()
+    if rank == 0:
+        print("timings : ", t2-t1, t3-t2)
 
-    res = minimize(fun=loss, x0=x0, jac=grad_loss, method="L-BFGS-B", options={'maxiter': nite, 'disp': True},
+    res = minimize(fun=loss, x0=x0, jac=grad_loss, method="L-BFGS-B", options={'maxiter': nite, 'disp': rank==0},
                    callback=callback)
 
     return _to_x_tensors(res.x)
