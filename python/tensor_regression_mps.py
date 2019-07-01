@@ -105,7 +105,7 @@ def predict(prj, x_tensors, path=None):
     return tmp3, None
 
 
-def fit(y, prj, D, nite, rtol = 1e-5, verbose=0, random_init=True, optimize_alpha=-1, print_interval=20, comm=None, seed=1):
+def fit(y, prj, D, nite, verbose=0, random_init=True, optimize_alpha=-1, comm=None, seed=1):
     """
     Alternating least squares
 

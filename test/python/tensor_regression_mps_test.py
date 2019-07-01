@@ -35,7 +35,7 @@ class TestMethods(unittest.TestCase):
 
             numpy.random.seed(100)
 
-            x_tensors = fit(y, tensors_A, D, 10000, rtol=1e-5, verbose=0, random_init=True, optimize_alpha=-1, print_interval=20, comm=None, seed=1)
+            x_tensors = fit(y, tensors_A, D, 10000, verbose=0, random_init=True, optimize_alpha=-1, comm=None, seed=1)
 
             y_pred, _ = predict(tensors_A, x_tensors)
 
