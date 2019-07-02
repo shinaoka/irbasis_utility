@@ -9,6 +9,28 @@ from irbasis_util.two_point_basis import *
 from irbasis_util.internal import *
 from irbasis_util.regression import *
 from irbasis_util.tensor_regression_mps import fit, predict
+import irbasis_util.tensor_regression
+#from irbasis_util.tensor_regression import fit as fit_cp
+#from irbasis_util.tensor_regression import predict as predict_cp
+
+
+def from_cp_to_mps(x_tensors_cp):
+    N = len(x_tensors_cp)
+    D = x_tensors_cp[0].shape[0]
+
+    x_tensors_mps = []
+    x_tensors_mps.append(x_tensors_cp[0].copy())
+    for i in range(1,N-1):
+        phys_dim = x_tensors_cp[i].shape[1]
+        x_mps = numpy.zeros((D, D, phys_dim), dtype=complex)
+        for j in range(phys_dim):
+            x_mps[:, :, j] = numpy.diag(x_tensors_cp[i][:, j])
+        x_tensors_mps.append(x_mps)
+    x_tensors_mps.append(x_tensors_cp[-1].copy())
+
+    return x_tensors_mps
+
+
 
 class TestMethods(unittest.TestCase):
     def __init__(self, *args, **kwargs):
@@ -18,11 +40,12 @@ class TestMethods(unittest.TestCase):
     def test_als(self):
         numpy.random.seed(100)
 
-        Nw = 4
+        Nw = 20
         Nr = 2
         linear_dim = 5
-        D = 10
-        num_o = 4
+        D = 2
+        num_o = 2
+        alpha = 0.0
 
         def create_tensor_3(N, M, L):
             rand = numpy.random.rand(N, M, L) + 1J * numpy.random.rand(N, M, L)
@@ -35,7 +58,23 @@ class TestMethods(unittest.TestCase):
 
             numpy.random.seed(100)
 
-            x_tensors = fit(y, tensors_A, D, 10000, verbose=0, random_init=True, optimize_alpha=-1, comm=None, seed=1)
+            model = irbasis_util.tensor_regression.OvercompleteGFModel(Nw, Nr, freq_dim, num_o, linear_dim, tensors_A, y, alpha, D)
+            info = irbasis_util.tensor_regression.optimize_als(model, nite = 400, rtol=1e-10, verbose=1)
+            print("loss", info['losss'][-1])
+
+            x0_mps = from_cp_to_mps(model.x_tensors())
+
+            y_pred, _ = predict(tensors_A, x0_mps)
+            loss_mps0 = numpy.linalg.norm(y - y_pred)**2
+
+            #print("loss ", loss_mps0- info['losss'][-1])
+            #numpy.testing.assert_allclose([loss_mps0], [info['losss'][-1]], atol=1e-5, rtol=1e-5)
+            numpy.testing.assert_allclose(loss_mps0, info['losss'][-1])
+            #loss_new = numpy.sqrt((numpy.linalg.norm(y - y_pred)**2)/(Nw * num_o))
+
+
+            x_tensors = fit(y, tensors_A, D, 10000, verbose=0, x0=x0_mps,
+                            random_init=False, optimize_alpha=-1, comm=None, seed=1, method='adam')
 
             y_pred, _ = predict(tensors_A, x_tensors)
 

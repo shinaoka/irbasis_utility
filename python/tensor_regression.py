@@ -294,9 +294,7 @@ def __ridge_complex_lsqr(N1, N2, A, y, alpha, num_data=1, verbose=0, x0=None, at
     if is_enabled_MPI:
         if comm is None:
             raise RuntimeError("comm is None")
-    r = lsqr(A, y.reshape((N1, num_data)), damp=numpy.sqrt(alpha), x0=x0, atol_r1norm=atol, comm=comm)
-    #if comm.Get_rank() == 0:
-        #print("N ite", r[2])
+    r = lsqr(A, y.ravel(), damp=numpy.sqrt(alpha), x0=x0, atol_r1norm=atol, comm=comm)
     return r[0]
 
 def __normalize_tensor(tensor):

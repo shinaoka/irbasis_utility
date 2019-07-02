@@ -1,8 +1,10 @@
 from __future__ import print_function
 
 import sys
+import copy
 import autograd.numpy as numpy  # Thinly-wrapped numpy
 from autograd import grad  # The only autograd function you may ever need
+from autograd.misc.optimizers import adam
 
 #import jax.numpy as numpy
 #from jax import grad  # The only autograd function you may ever need
@@ -105,7 +107,7 @@ def predict(prj, x_tensors, path=None):
     return tmp3, None
 
 
-def fit(y, prj, D, nite, verbose=0, random_init=True, optimize_alpha=-1, comm=None, seed=1):
+def fit(y, prj, D, nite, verbose=0, random_init=True, x0=None, optimize_alpha=-1, comm=None, seed=1, method='L-BFGS-B'):
     """
     Alternating least squares
 
@@ -145,6 +147,9 @@ def fit(y, prj, D, nite, verbose=0, random_init=True, optimize_alpha=-1, comm=No
 
     if is_enabled_MPI:
         rank = comm.Get_rank()
+        num_proc = comm.Get_size()
+    else:
+        num_proc = 1
 
     freq_dim = len(prj)
     num_w, num_rep, linear_dim = prj[0].shape
@@ -163,8 +168,11 @@ def fit(y, prj, D, nite, verbose=0, random_init=True, optimize_alpha=-1, comm=No
     x_shapes = [(D,num_rep)] + freq_dim*[(D,D,linear_dim)] + [(D,num_o)]
     x_sizes = [numpy.prod(shape) for shape in x_shapes]
     if random_init:
+        assert x0 is None
         random.seed(seed)
         x_tensors = [_init_random_array(*shape) for shape in x_shapes]
+    elif not x0 is None:
+        x_tensors = copy.deepcopy(x0)
     else:
         x_tensors = [numpy.zeros(*shape, dtype=complex) for shape in x_shapes]
     if is_enabled_MPI:
@@ -219,7 +227,7 @@ def fit(y, prj, D, nite, verbose=0, random_init=True, optimize_alpha=-1, comm=No
 
     def loss_local(x):
         x_tensors = _to_x_tensors(x)
-        return _se_local(x_tensors) + alpha * _snorm_local(x_tensors) / comm.Get_size()
+        return _se_local(x_tensors) + alpha * _snorm_local(x_tensors) / num_proc
 
     grad_loss_local = grad(loss_local)
         
@@ -255,8 +263,16 @@ def fit(y, prj, D, nite, verbose=0, random_init=True, optimize_alpha=-1, comm=No
     if rank == 0:
         print("timings : ", t2-t1, t3-t2)
 
-    res = minimize(fun=loss, x0=x0, jac=grad_loss, method="L-BFGS-B", options={'maxiter': nite, 'disp': rank==0},
+    if method == 'L-BFGS-B':
+        res = minimize(fun=loss, x0=x0, jac=grad_loss, method="L-BFGS-B", options={'maxiter': nite, 'disp': rank==0},
                    callback=callback)
-
-    return _to_x_tensors(res.x)
+        return _to_x_tensors(res.x)
+    elif method == 'adam':
+        grad_tmp = lambda x, i : grad_loss(x)
+        def callback_tmp(x, i, g):
+            if i % 10 == 0:
+                print('Iteration ', i, loss(x))
+        return _to_x_tensors(adam(grad_tmp, x0, callback=callback_tmp, num_iters=nite))
+    else:
+        raise RuntimeError("Unknown method " + method)
 
