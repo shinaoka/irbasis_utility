@@ -349,6 +349,9 @@ def optimize_als(model, nite, rtol = 1e-5, verbose=0, optimize_alpha=-1, print_i
     tensors_A = model.tensors_A
     y = model.y
 
+    x_shapes = [(D,num_rep)] + freq_dim*[(D,D,linear_dim)] + [(D,num_o)]
+    x_sizes = [numpy.prod(shape) for shape in x_shapes]
+
     def update_r_tensor():
         """
         Build a least squares model for optimizing core tensor
@@ -407,6 +410,21 @@ def optimize_als(model, nite, rtol = 1e-5, verbose=0, optimize_alpha=-1, print_i
         t3 = time.time()
         if verbose >= 2:
             print("rest : time ", t2-t1, t3-t2)
+
+    def _to_x_tensors(x):
+        tmp = x.reshape((2, -1))
+        x1d = tmp[0, :] + 1J * tmp[1, :]
+        offset = 0
+        x_tensors = []
+        for i in range(len(x_shapes)):
+            block = x1d[offset:offset+x_sizes[i]]
+            x_tensors.append(block.reshape(x_shapes[i]))
+            offset += x_sizes[i]
+        return x_tensors
+
+    def _from_x_tensors(x_tensors):
+        x1d = numpy.hstack([numpy.ravel(x) for x in x_tensors])
+        return numpy.hstack((x1d.real, x1d.imag))
 
     numpy.random.seed(seed)
     model.x_r = numpy.random.rand(*model.x_r.shape) + 1J * numpy.random.rand(*model.x_r.shape)
@@ -500,4 +518,253 @@ def optimize_als(model, nite, rtol = 1e-5, verbose=0, optimize_alpha=-1, print_i
     info['rmses'] = rmses
 
     return info
+
+
+def fit(y, prj, D, nite,  rtol = 1e-5, verbose=0, random_init=True, x0=None, optimize_alpha=-1, comm=None, seed=1, nesterov=False):
+    """
+    Alternating least squares
+
+    Parameters
+    ----------
+    model:  object of OvercompleteGFModel
+        Model to be optimized
+
+    nite: int
+        Number of max iterations.
+
+    rtol: float
+        Stopping condition of optimization.
+        Iterations stop if abs(||r_k|| - ||r_{k-1}||) < rtol * ||y||
+        r_k is the residual vector at iteration k.
+
+    verbose: int
+        0, 1, 2
+
+    min_norm: float
+        The result is regarded as 0 if the norm drops below min_norm during optimization.
+
+    optimize_alpha: float
+        If a positive value is given, the value of the regularization parameter alpha is automatically determined.
+        (regularization term)/(squared norm of the residual) ~ optimize_alpha.
+
+    Returns
+    -------
+
+    """
+
+    import copy
+
+    rank = 0
+    if comm is None and is_enabled_MPI:
+        comm = MPI.COMM_WORLD
+
+    if is_enabled_MPI:
+        rank = comm.Get_rank()
+        num_proc = comm.Get_size()
+    else:
+        num_proc = 1
+
+    freq_dim = len(prj)
+    num_w, num_rep, linear_dim = prj[0].shape
+    num_o = y.shape[1]
+
+    assert y.shape[0] == num_w
+    assert y.shape[1] == num_o
+
+    def _init_random_array(*shape):
+        return numpy.random.rand(*shape) + 1J * numpy.random.rand(*shape)
+
+    # Init x_tensors
+    x_shapes = [(D, num_rep)] + freq_dim * [(D, linear_dim)] + [(D, num_o)]
+    x_sizes = [numpy.prod(shape) for shape in x_shapes]
+    if random_init:
+        assert x0 is None
+        numpy.random.seed(seed)
+        x_tensors = [_init_random_array(*shape) for shape in x_shapes]
+    elif not x0 is None:
+        x_tensors = copy.deepcopy(x0)
+    else:
+        x_tensors = [numpy.zeros(shape, dtype=complex) for shape in x_shapes]
+    if is_enabled_MPI:
+        for i in range(len(x_tensors)):
+            x_tensors[i] = comm.bcast(x_tensors[i], root=0)
+
+    # Init alpha
+    alpha = 0.0
+
+    if is_enabled_MPI:
+        norm_y = numpy.sqrt(comm.allreduce(numpy.linalg.norm(y)**2))
+        num_w_tot = comm.allreduce(num_w)
+    else:
+        norm_y = numpy.linalg.norm(y)
+        num_w_tot = num_w
+
+    atol_lsqr = 0.1 * rtol * norm_y
+
+    def _to_x_tensors(x):
+        tmp = x.reshape((2, -1))
+        x1d = tmp[0, :] + 1J * tmp[1, :]
+        offset = 0
+        x_tensors = []
+        for i in range(len(x_shapes)):
+            block = x1d[offset:offset + x_sizes[i]]
+            x_tensors.append(block.reshape(x_shapes[i]))
+            offset += x_sizes[i]
+        return x_tensors
+
+    def _from_x_tensors(x_tensors):
+        x1d = numpy.hstack([numpy.ravel(x) for x in x_tensors])
+        return numpy.hstack((x1d.real, x1d.imag))
+
+    def _se_local(x_tensors):
+        y_pre = predict(prj, x_tensors)
+        return squared_L2_norm(y - y_pre)
+
+    def _snorm_local(x_tensors):
+        return numpy.sum(numpy.array([squared_L2_norm(t) for t in x_tensors]))
+
+    def _se_mpi(x_tensors):
+        if is_enabled_MPI:
+            return comm.allreduce(_se_local(x_tensors))
+        else:
+            return _se_local(x_tensors)
+
+    def _snorm_mpi(x_tensors):
+        if is_enabled_MPI:
+            return comm.allreduce(_snorm_local(x_tensors))
+        else:
+            return _snorm_local(x_tensors)
+
+    def loss_local(x):
+        x_tensors = _to_x_tensors(x)
+        return _se_local(x_tensors) + alpha * _snorm_local(x_tensors) / num_proc
+
+    def loss(x):
+        if is_enabled_MPI:
+            return comm.allreduce(loss_local(x))
+        else:
+            return loss_local(x)
+
+    def update_r_tensor(x_r, xs_l, x_orb):
+        """
+        Build a least squares model for optimizing core tensor
+        """
+        A_op = linear_operator_r(num_w*num_o, D*num_rep, prj, x_r, xs_l, x_orb)
+        x_r[:,:] = __ridge_complex_lsqr(num_w*num_o, D * num_rep, A_op, y, alpha, atol=atol_lsqr, comm=comm).reshape((D, num_rep))
+
+    def update_l_tensor(pos, x_r, xs_l, x_orb):
+        assert pos >= 0
+
+        t1 = time.time()
+
+        mask = numpy.arange(freq_dim) != pos
+        prj_masked = list(compress(prj, mask))
+        xs_l_masked = list(compress(xs_l, mask))
+
+        A_op = linear_operator_l(num_w*num_o, D*linear_dim, prj_masked, prj[pos], x_r, xs_l_masked, x_orb)
+
+        # At this point, A_lsm is shape of (num_w, num_o, D, Nl)
+        t2 = time.time()
+        xs_l[pos][:,:] = __ridge_complex_lsqr(num_w*num_o, D*linear_dim, A_op, y, alpha,
+                                                    x0=xs_l[pos].ravel(),
+                                                    atol=atol_lsqr, comm=comm).reshape((D, linear_dim))
+        t3 = time.time()
+        if verbose >= 2:
+            print("rest : time ", t2-t1, t3-t2)
+
+    def update_orb_tensor(x_r, xs_l, x_orb):
+
+        # (wrl, dl) -> (wrd)
+        # (wrm, dm) -> (wrd)
+        # (wrn, dn) -> (wrd)
+        tmp_wrd = numpy.full((num_w, num_rep, D), complex(1.0))
+        for i in range(freq_dim):
+            tmp_wrd *= numpy.einsum('wrl, dl -> wrd', prj[i], xs_l[i], optimize=True)
+        A_lsm = numpy.einsum('wrd,dr -> w d', tmp_wrd, x_r, optimize=True)
+
+        # A_lsm_c: (D, num_w)
+        A_lsm_c = A_lsm.conjugate().transpose()
+
+        def matvec(x):
+            return numpy.dot(A_lsm, x.reshape((D, num_o))).ravel()
+
+        def rmatvec(y):
+            # Return (D, num_o)
+            y = y.reshape((num_w, num_o))
+            return numpy.dot(A_lsm_c, y).ravel()
+
+        N1, N2 = num_w*num_o, D*num_o
+        A_lsm_op = LinearOperator((N1, N2), matvec=matvec, rmatvec=rmatvec)
+        x_orb[:, :] = __ridge_complex_lsqr(N1, N2, A_lsm_op, y,
+                                                 alpha, atol=atol_lsqr, comm=comm).reshape((D, num_o))
+
+
+    def als(x):
+        x_tensors = _to_x_tensors(x)
+
+        x_r = x_tensors[0]
+        xs_l = x_tensors[1:-1]
+        x_orb = x_tensors[-1]
+
+        # Optimize r tensor
+        t1 = time.time()
+        update_r_tensor(x_r, xs_l, x_orb)
+
+        t2 = time.time()
+        # Optimize the other tensors
+        for pos in range(freq_dim):
+            update_l_tensor(pos, x_r, xs_l, x_orb)
+
+        t3 = time.time()
+
+        update_orb_tensor(x_r, xs_l, x_orb)
+
+        t4 = time.time()
+
+        if rank == 0:
+            print(' timings: ', t2-t1, t3-t2, t4-t3)
+
+        return _from_x_tensors(x_tensors)
+
+    x0 = _from_x_tensors(x_tensors)
+
+    x_hist = []
+    loss_hist = []
+
+    def append_x(x):
+        x_hist.append(x)
+        loss_hist.append(loss(x))
+
+    append_x(x0)
+    append_x(als(x0))
+
+    #print("debug", x0)
+    #print("debug", als(x0))
+    #sys.exit(1)
+
+    for epoch in range(nite):
+        if verbose > 0 and rank == 0:
+            print("epoch = ", epoch, " loss = ", loss_hist[-1], " alpha = ", alpha)
+
+        if nesterov:
+            if epoch >= 1 and loss_hist[-1] > loss_hist[-2]:
+                x_hist[-1] = x_hist[-2].copy()
+                loss_hist[-1] = loss_hist[-2]
+                beta = 0.0
+            else:
+                beta = 1.0
+        else:
+            beta = 0.0
+
+        if optimize_alpha > 0:
+            x_tensors = _to_x_tensors(x_hist[-1])
+            reg = _snorm_mpi(x_tensors)
+            se = _se_mpi(x_tensors)
+            alpha = optimize_alpha * se/reg
+            if rank == 0:
+                print("alpha = ", alpha)
+
+        append_x(als(x_hist[-1] + beta * (x_hist[-1] - x_hist[-2])))
+
+    return _to_x_tensors(x_hist[-1])
 
