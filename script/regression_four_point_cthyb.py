@@ -13,10 +13,8 @@ import argparse
 import irbasis
 import matplotlib.pylab as plt
 from irbasis_util.four_point import from_PH_convention, FourPoint
-#from irbasis_util.internal import *
-#from irbasis_util.regression import *
 
-from irbasis_util.tensor_regression import *
+from irbasis_util.tensor_regression import fit, predict, enable_MPI
 from mpi4py import MPI 
 
 
@@ -49,6 +47,9 @@ parser.add_argument('path_output_file', action='store', default=None, type=str, 
 parser.add_argument('--niter', default=20, type=int, help='Number of iterations')
 parser.add_argument('--D', default=1, type=int, help='Rank of decomposition')
 parser.add_argument('--Lambda', default=1000.0, type=float, help='Lambda')
+parser.add_argument('--seed', default=1, type=int, help='seed')
+parser.add_argument('--nesterov', default=True, type=bool, help='nesterov')
+parser.add_argument('--alpha', default=1e-8, type=float, help='regularization parameter')
 
 args = parser.parse_args()
 if os.path.isfile(args.path_input_file) is False:
@@ -69,9 +70,6 @@ with h5py.File(args.path_input_file, 'r') as hf:
 if rank == 0:
     print("Lambda = ", Lambda)
     print("beta = ", beta)
-#debug
-#G2iwn = G2iwn[:1, :]
-#num_o = 1
 
 # n1, n2, n3, n4 convention
 freqs = []
@@ -86,6 +84,7 @@ orb_idx = tmp/numpy.amax(tmp) > 1e-5
 num_o_nonzero = numpy.sum(orb_idx)
 if rank == 0:
     print("Num of active orbital components = ", num_o_nonzero)
+    print("Num of freqs = ", n_freqs)
 
 sizes, offsets = mpi_split(n_freqs, comm.size)
 n_freqs_local = sizes[rank]
@@ -101,43 +100,21 @@ sp_local = numpy.array(freqs)[start:end,:]
 sp_local = [tuple(sp_local[i,:]) for i in range(sp_local.shape[0])]
 
 # Regression
-def kruskal_complex_Ds(tensors_A, y, Ds, cutoff=1e-5):
-    """
-    
-    Parameters
-    ----------
-    A
-    y
-
-    Returns
-    -------
-    
-
-    """
-
+def perform_fit(tensors_A, y, Ds, cutoff=1e-5):
     coeffs_D = []
-    squared_errors_D = []
-    model_D = []
     Nw, Nr, linear_dim = tensors_A[0].shape
-    alpha_init = 0
     y = y.reshape((-1, num_o))
 
     for i, D in enumerate(Ds):
         if rank == 0:
             print("D ", D)
-        model = OvercompleteGFModel(Nw, Nr, 3, num_o_nonzero, linear_dim, tensors_A, y[:, orb_idx], alpha_init, D)
-        info = optimize_als(model, args.niter, rtol = 1e-8, optimize_alpha=1e-8, verbose = 1, print_interval=1)
-        xs = copy.deepcopy(model.x_tensors())
+        xs = fit(y[:, orb_idx], tensors_A, D, args.niter, rtol=1e-8, alpha=args.alpha, verbose=1, random_init=True, comm=comm, seed=args.seed, nesterov=args.nesterov)
         x_orb_full = numpy.zeros((D, num_o), dtype=complex)
         x_orb_full[:, orb_idx] = xs[-1]
         xs[-1] = x_orb_full
         coeffs_D.append(xs)
-        squared_errors_D.append(info['rmses'][-1]**2)
-        model_D.append(model)
     
-    squared_errors_D = numpy.array(squared_errors_D)
-    
-    return coeffs_D, squared_errors_D, model_D
+    return coeffs_D
 
 def construct_prj(sp):
     n_sp = len(sp)
@@ -151,7 +128,7 @@ prj = construct_prj(sp_local)
 
 Ds = [args.D]
 y = G2iwn_local.transpose((1,0))
-coeffs_D, se_D, model_D = kruskal_complex_Ds(prj, y, Ds)
+coeffs_D = perform_fit(prj, y, Ds)
 
 if is_master_node:
     with h5py.File(args.path_output_file, 'a') as hf:
