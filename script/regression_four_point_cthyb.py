@@ -50,6 +50,7 @@ parser.add_argument('--Lambda', default=1000.0, type=float, help='Lambda')
 parser.add_argument('--seed', default=1, type=int, help='seed')
 parser.add_argument('--nesterov', default=True, type=bool, help='nesterov')
 parser.add_argument('--alpha', default=1e-8, type=float, help='regularization parameter')
+parser.add_argument('--scut', default=1e-4, type=float, help='Cutoff value for singular values')
 
 args = parser.parse_args()
 if os.path.isfile(args.path_input_file) is False:
@@ -93,7 +94,7 @@ G2iwn_local = G2iwn[:,start:end]
 
 wmax = Lambda / beta
 
-phb = FourPoint(Lambda, beta, 1e-4, True)
+phb = FourPoint(Lambda, beta, args.scut, True)
 Nl = phb.Nl
 
 sp_local = numpy.array(freqs)[start:end,:]
