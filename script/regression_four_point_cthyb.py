@@ -48,7 +48,7 @@ parser.add_argument('--niter', default=20, type=int, help='Number of iterations'
 parser.add_argument('--D', default=1, type=int, help='Rank of decomposition')
 parser.add_argument('--Lambda', default=1000.0, type=float, help='Lambda')
 parser.add_argument('--seed', default=1, type=int, help='seed')
-parser.add_argument('--nesterov', default=False, type=bool, help='nesterov')
+parser.add_argument('--nesterov', default=True, type=bool, help='nesterov')
 parser.add_argument('--alpha', default=1e-8, type=float, help='regularization parameter')
 
 args = parser.parse_args()
