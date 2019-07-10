@@ -160,7 +160,7 @@ class OvercompleteGFModel(object):
 
         r = squared_L2_norm(self.y - y_pre)
         for t in x_tensors:
-            r += self.っっKalpha * squared_L2_norm(t)
+            r += self.alpha * squared_L2_norm(t)
         return r
 
     def squared_norm(self, x_tensors=None):
@@ -520,7 +520,7 @@ def optimize_als(model, nite, rtol = 1e-5, verbose=0, optimize_alpha=-1, print_i
     return info
 
 
-def fit(y, prj, D, nite,  rtol = 1e-5, verbose=0, random_init=True, x0=None, optimize_alpha=-1, comm=None, seed=1, nesterov=False):
+def fit(y, prj, D, nite,  rtol = 1e-5, verbose=0, random_init=True, x0=None, alpha=1e-8, comm=None, seed=1, nesterov=False):
     """
     Alternating least squares
 
@@ -588,9 +588,6 @@ def fit(y, prj, D, nite,  rtol = 1e-5, verbose=0, random_init=True, x0=None, opt
     if is_enabled_MPI:
         for i in range(len(x_tensors)):
             x_tensors[i] = comm.bcast(x_tensors[i], root=0)
-
-    # Init alpha
-    alpha = 0.0
 
     if is_enabled_MPI:
         norm_y = numpy.sqrt(comm.allreduce(numpy.linalg.norm(y)**2))
@@ -732,6 +729,10 @@ def fit(y, prj, D, nite,  rtol = 1e-5, verbose=0, random_init=True, x0=None, opt
     loss_hist = []
 
     def append_x(x):
+        assert len(x_hist) == len(loss_hist)
+        if len(x_hist) > 2:
+            del x_hist[:-2]
+            del loss_hist[:-2]
         x_hist.append(x)
         loss_hist.append(loss(x))
 
@@ -742,9 +743,13 @@ def fit(y, prj, D, nite,  rtol = 1e-5, verbose=0, random_init=True, x0=None, opt
     #print("debug", als(x0))
     #sys.exit(1)
 
+    beta = 1.0
     for epoch in range(nite):
         if verbose > 0 and rank == 0:
             print("epoch = ", epoch, " loss = ", loss_hist[-1], " alpha = ", alpha)
+        sys.stdout.flush()
+        if numpy.abs(loss_hist[-1]-loss_hist[-2]) < rtol * numpy.abs(loss_hist[-1]):
+            break
 
         if nesterov:
             if epoch >= 1 and loss_hist[-1] > loss_hist[-2]:
@@ -753,16 +758,10 @@ def fit(y, prj, D, nite,  rtol = 1e-5, verbose=0, random_init=True, x0=None, opt
                 beta = 0.0
             else:
                 beta = 1.0
+            if rank == 0:
+                print(" beta = ", beta)
         else:
             beta = 0.0
-
-        if optimize_alpha > 0:
-            x_tensors = _to_x_tensors(x_hist[-1])
-            reg = _snorm_mpi(x_tensors)
-            se = _se_mpi(x_tensors)
-            alpha = optimize_alpha * se/reg
-            if rank == 0:
-                print("alpha = ", alpha)
 
         append_x(als(x_hist[-1] + beta * (x_hist[-1] - x_hist[-2])))
 
