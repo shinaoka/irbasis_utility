@@ -520,7 +520,7 @@ def optimize_als(model, nite, rtol = 1e-5, verbose=0, optimize_alpha=-1, print_i
     return info
 
 
-def fit(y, prj, D, nite,  rtol = 1e-5, verbose=0, random_init=True, x0=None, alpha=1e-8, comm=None, seed=1, nesterov=False):
+def fit(y, prj, D, nite,  rtol = 1e-3, verbose=0, random_init=True, x0=None, alpha=1e-8, comm=None, seed=1, nesterov=True):
     """
     Alternating least squares
 
@@ -596,7 +596,7 @@ def fit(y, prj, D, nite,  rtol = 1e-5, verbose=0, random_init=True, x0=None, alp
         norm_y = numpy.linalg.norm(y)
         num_w_tot = num_w
 
-    atol_lsqr = 0.1 * rtol * norm_y
+    atol_lsqr = None
 
     def _to_x_tensors(x):
         tmp = x.reshape((2, -1))
@@ -635,6 +635,13 @@ def fit(y, prj, D, nite,  rtol = 1e-5, verbose=0, random_init=True, x0=None, alp
     def loss_local(x):
         x_tensors = _to_x_tensors(x)
         return _se_local(x_tensors) + alpha * _snorm_local(x_tensors) / num_proc
+
+    def se(x):
+        x_tensors = _to_x_tensors(x)
+        if is_enabled_MPI:
+            return comm.allreduce(_se_local(x_tensors))
+        else:
+            return _se_local(x_tensors)
 
     def loss(x):
         if is_enabled_MPI:
@@ -727,28 +734,27 @@ def fit(y, prj, D, nite,  rtol = 1e-5, verbose=0, random_init=True, x0=None, alp
 
     x_hist = []
     loss_hist = []
+    rse_hist = []
 
     def append_x(x):
         assert len(x_hist) == len(loss_hist)
         if len(x_hist) > 2:
             del x_hist[:-2]
             del loss_hist[:-2]
+            del rse_hist[:-2]
         x_hist.append(x)
         loss_hist.append(loss(x))
+        rse_hist.append(se(x))
 
     append_x(x0)
     append_x(als(x0))
 
-    #print("debug", x0)
-    #print("debug", als(x0))
-    #sys.exit(1)
-
     beta = 1.0
     for epoch in range(nite):
         if verbose > 0 and rank == 0:
-            print("epoch = ", epoch, " loss = ", loss_hist[-1], " alpha = ", alpha)
+            print('epoch= ', epoch, ' loss= ', loss_hist[-1], ' rse= ', rse_hist[-1], ' diff_rse= ', numpy.abs(rse_hist[-1]-rse_hist[-2]), ' alpha = ', alpha)
         sys.stdout.flush()
-        if numpy.abs(loss_hist[-1]-loss_hist[-2]) < rtol * numpy.abs(loss_hist[-1]):
+        if numpy.abs(rse_hist[-1]-rse_hist[-2]) < rtol * numpy.abs(rse_hist[-1]):
             break
 
         if nesterov:
