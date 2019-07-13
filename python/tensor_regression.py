@@ -744,7 +744,7 @@ def fit(y, prj, D, nite,  rtol = 1e-3, verbose=0, random_init=True, x0=None, alp
             del rse_hist[:-2]
         x_hist.append(x)
         loss_hist.append(loss(x))
-        rse_hist.append(se(x))
+        rse_hist.append(numpy.sqrt(se(x)))
 
     append_x(x0)
     append_x(als(x0))
