@@ -34,6 +34,8 @@ class TestMethods(unittest.TestCase):
         n = numpy.arange(-10, 10)
         Unl = self._B.compute_Unl(n)
         unl = self._b.compute_unl(n)
+        #for l in range(Unl.shape[1]):
+            #print(l, Unl[:,l])
         self.assertTrue(numpy.allclose(Unl, numpy.sqrt(beta) * unl, 1e-10))
 
     def test_sampling_points_tau(self):

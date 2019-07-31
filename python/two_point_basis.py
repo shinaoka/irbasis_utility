@@ -209,27 +209,52 @@ def _funique(x, tol=2e-16):
     x = x[unique]
     return x
 
-def _find_roots(ulx_data, xoffset, tol=2e-16):
-    """Find all roots in the piecewise polynomial representation"""
-    nsec, npoly = ulx_data.shape
-    if xoffset.shape != (nsec+1,):
-        raise ValueError("Invalid section edges shape")
 
-    xsegm = xoffset[1:] - xoffset[:-1]
-    roots = []
-    for i in range(nsec):
-        x0s = numpy.roots(ulx_data[i, ::-1])
-        x0s = [(x0 + xoffset[i]).real for x0 in x0s
-               if -tol < x0 < xsegm[i]+tol and numpy.abs(x0.imag) < tol]
-        roots += x0s
+def _find_roots(ulx):
+    """Find all roots in (-1, 1) using double exponential mesh + bisection"""
+    Nx = 10000
+    eps = 1e-14
+    tvec = numpy.linspace(-3, 3, Nx)  # 3 is a very safe option.
+    xvec = numpy.tanh(0.5 * numpy.pi * numpy.sinh(tvec))
 
-    roots = numpy.asarray(roots)
-    roots = numpy.hstack((-roots[::-1], roots))
-    roots = _funique(roots, tol)
-    return roots
+    zeros = []
+    for i in range(Nx - 1):
+        if ulx(xvec[i]) * ulx(xvec[i + 1]) < 0:
+            a = xvec[i + 1]
+            b = xvec[i]
+            u_a = ulx(a)
+            u_b = ulx(b)
+            while a - b > eps:
+                half_point = 0.5 * (a + b)
+                if ulx(half_point) * u_a > 0:
+                    a = half_point
+                else:
+                    b = half_point
+            zeros.append(0.5 * (a + b))
+    return numpy.array(zeros)
+
+
+#def _find_roots(ulx_data, xoffset, tol=2e-16):
+    #"""Find all roots in the piecewise polynomial representation"""
+    #nsec, npoly = ulx_data.shape
+    #if xoffset.shape != (nsec+1,):
+        #raise ValueError("Invalid section edges shape")
+#
+    #xsegm = xoffset[1:] - xoffset[:-1]
+    #roots = []
+    #for i in range(nsec):
+        #x0s = numpy.roots(ulx_data[i, ::-1])
+        #x0s = [(x0 + xoffset[i]).real for x0 in x0s
+               #if -tol < x0 < xsegm[i]+tol and numpy.abs(x0.imag) < tol]
+        #roots += x0s
+#
+    #roots = numpy.asarray(roots)
+    #roots = numpy.hstack((-roots[::-1], roots))
+    #roots = _funique(roots, tol)
+    #return roots
 
 def sampling_points_x(basis_xy, whichl):
-    xroots =  _find_roots(basis_xy._ulx_data[whichl], basis_xy._ulx_section_edges, 1e-8)
+    xroots =  _find_roots(lambda x: basis_xy.ulx(whichl, x))
     xroots_ex = numpy.hstack((-1.0, xroots, 1.0))
     return 0.5 * (xroots_ex[:-1] + xroots_ex[1:])
 

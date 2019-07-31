@@ -754,8 +754,6 @@ def fit(y, prj, D, nite,  rtol = 1e-3, verbose=0, random_init=True, x0=None, alp
         if verbose > 0 and rank == 0:
             print('epoch= ', epoch, ' loss= ', loss_hist[-1], ' rse= ', rse_hist[-1], ' diff_rse= ', numpy.abs(rse_hist[-1]-rse_hist[-2]), ' alpha = ', alpha)
         sys.stdout.flush()
-        if numpy.abs(rse_hist[-1]-rse_hist[-2]) < rtol * numpy.abs(rse_hist[-1]):
-            break
 
         if nesterov:
             if epoch >= 1 and loss_hist[-1] > loss_hist[-2]:
@@ -770,6 +768,9 @@ def fit(y, prj, D, nite,  rtol = 1e-3, verbose=0, random_init=True, x0=None, alp
             beta = 0.0
 
         append_x(als(x_hist[-1] + beta * (x_hist[-1] - x_hist[-2])))
+
+        if numpy.abs(rse_hist[-1]-rse_hist[-2]) < rtol * numpy.abs(rse_hist[-1]):
+            break
 
     return _to_x_tensors(x_hist[-1])
 
