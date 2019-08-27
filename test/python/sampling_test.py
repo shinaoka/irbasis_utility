@@ -25,6 +25,11 @@ class TestMethods(unittest.TestCase):
             dim = b.dim - 4
             whichl = dim - 1
             sp = sampling_points_matsubara(b, whichl)
+            if stat == 'F':
+                assert numpy.all([-s-1 in sp for s in sp])
+            elif stat in ['B', 'bB']:
+                assert numpy.all([-s in sp for s in sp])
+
             assert len(sp) == whichl+1
 
             Unl = b.compute_Unl(sp)[:, :dim]

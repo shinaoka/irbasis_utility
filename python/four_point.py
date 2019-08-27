@@ -143,8 +143,8 @@ class FourPoint(object):
             ovec[3] = - ovec[0] - ovec[1] - ovec[2]
             append_sp(ovec[0], ovec[1], ovec[2]) # No. 1
             append_sp(ovec[0], ovec[1], ovec[3]) # No. 2
-            append_sp(ovec[0], ovec[2], ovec[3]) # No. 3
-            append_sp(ovec[1], ovec[2], ovec[3]) # No. 4
+            append_sp(ovec[0], ovec[3], ovec[1]) # No. 3
+            append_sp(ovec[3], ovec[0], ovec[1]) # No. 4
 
         # FBF
         perms = [numpy.array(p) for p in permutations([0, 1, 2, 3]) if p[0] < p[1]]
