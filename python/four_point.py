@@ -128,8 +128,8 @@ class FourPoint(object):
         """
         Return sampling points
         """
-        sp_o_f = 2 * sampling_points_matsubara(self._Bf, whichl) + 1
-        sp_o_b = 2 * sampling_points_matsubara(self._Bb, whichl)
+        sp_o_f = 2 * self._Bf.sampling_points_matsubara(whichl) + 1
+        sp_o_b = 2 * self._Bb.sampling_points_matsubara(whichl)
         sp_o = []
         Nf = len(sp_o_f)
         Nb = len(sp_o_b)

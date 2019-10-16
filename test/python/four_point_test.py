@@ -8,7 +8,7 @@ from irbasis_util.four_point import *
 from irbasis_util.internal import *
 from irbasis_util.regression import *
 
-from atomic_limit import *
+from common import *
 
 
 def G1_iw_pole_f(n, pole, beta):
@@ -40,14 +40,14 @@ def _compute_G4pt_l(b4pt, pole, r):
     Gl = numpy.zeros((16, Nl, Nl, Nl))
     if r >= 0  and r <= 3:
         Gl[r, :, :, :] = _outer_product(
-            Gl_pole(b4pt.basis_beta_f, pole)[:Nl],
-            Gl_pole(b4pt.basis_beta_f, pole)[:Nl],
-            Gl_pole(b4pt.basis_beta_f, pole)[:Nl])
+            Gl_pole_F(b4pt.basis_beta_f, pole)[:Nl],
+            Gl_pole_F(b4pt.basis_beta_f, pole)[:Nl],
+            Gl_pole_F(b4pt.basis_beta_f, pole)[:Nl])
     elif r <= 15:
         Gl[r, :, :, :] = _outer_product(
-            Gl_pole(b4pt.basis_beta_f, pole)[:Nl],
-            Gl_pole(b4pt.basis_beta_b, pole)[:Nl],
-            Gl_pole(b4pt.basis_beta_f, pole)[:Nl])
+            Gl_pole_F(b4pt.basis_beta_f, pole)[:Nl],
+            Gl_pole_barB(b4pt.basis_beta_b, pole)[:Nl],
+            Gl_pole_F(b4pt.basis_beta_f, pole)[:Nl])
     else:
         raise RuntimeError("Not supported")
 

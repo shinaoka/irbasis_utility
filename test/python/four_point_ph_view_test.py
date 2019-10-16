@@ -8,20 +8,20 @@ from irbasis_util.four_point_ph_view import *
 from irbasis_util.internal import *
 from irbasis_util.regression import *
 
-from atomic_limit import *
+from common import *
 
 def _compute_Gl(phb, pole, s1, s2, r):
     Nl = phb.Nl
     coeffs = numpy.zeros((3, 2, 2, Nl, Nl))
     if r == 0:
-        a = Gl_pole(phb.basis_beta_f, pole) 
-        b = Gl_pole(phb.basis_beta_f, pole) 
+        a = Gl_pole_F(phb.basis_beta_f, pole)
+        b = Gl_pole_F(phb.basis_beta_f, pole)
     elif r == 1:
-        a = Gl_pole(phb.basis_beta_b, pole) 
-        b = Gl_pole(phb.basis_beta_f, pole) 
+        a = Gl_pole_barB(phb.basis_beta_b, pole)
+        b = Gl_pole_F(phb.basis_beta_f, pole)
     elif r == 2:
-        a = Gl_pole(phb.basis_beta_b, pole) 
-        b = Gl_pole(phb.basis_beta_f, pole) 
+        a = Gl_pole_barB(phb.basis_beta_b, pole)
+        b = Gl_pole_F(phb.basis_beta_f, pole)
     coeffs[r, s1, s2, :, :] = a[:Nl, None] * b[None, :Nl]
     return coeffs
 
@@ -183,8 +183,8 @@ class TestMethods(unittest.TestCase):
         Nl = phb.Nl
         whichl = Nl - 1
         sp = set(phb.sampling_points_matsubara(whichl))
-        sp_f = sampling_points_matsubara(phb.basis_beta_f, whichl)
-        sp_b = sampling_points_matsubara(phb.basis_beta_b, whichl)
+        sp_f = phb.basis_beta_f.sampling_points_matsubara(whichl)
+        sp_b = phb.basis_beta_b.sampling_points_matsubara(whichl)
         sp_recomputed = set()
         for p in sp:
             for r, s1, s2 in product(range(3), range(2), range(2)):

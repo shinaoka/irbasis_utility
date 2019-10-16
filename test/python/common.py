@@ -1,5 +1,7 @@
 from __future__ import print_function
 import numpy
+import irbasis
+from irbasis_util.two_point_basis import augmented_basis_b, vertex_basis, Basis
 
 # G. Rohringer et al., PRB 86, 125114 (2012)
 
@@ -43,3 +45,31 @@ def G2_conn_ph(U, beta, n, np, m):
                    (hU**2 + (nu + omega)**2) * (hU**2 + (nu_p + omega)**2))
     leggs = leggs_1 / leggs_2
     return leggs * Fuu + leggs * Fud
+
+def Gl_pole_F(B, pole):
+    Sl = numpy.array([B.Sl(l) for l in range(B.dim)])
+    Vlpole = numpy.array([B.Vlomega(l, pole) for l in range(B.dim)])
+    return -Sl * Vlpole
+
+def Gl_pole_barB(B, pole):
+    Sl = numpy.array([B.Sl(l) for l in range(B.dim)])
+    assert pole != 0
+    Vlpole = numpy.zeros((B.dim))
+    Vlpole[2:] = numpy.sqrt(1 / B.wmax) * numpy.array([B.basis_xy.basis_b.vly(l, pole / B.wmax)
+                                                       for l in range(B.dim-2)])
+    return -Sl * Vlpole / pole
+
+
+def load_basis(stat, Lambda, beta):
+    if stat in ['F', 'B']:
+        b = irbasis.load(stat, Lambda)
+    elif stat == 'barB':
+        b = augmented_basis_b(irbasis.load('B', Lambda))
+    elif stat == 'barBV':
+        b = vertex_basis(augmented_basis_b(irbasis.load('B', Lambda)))
+    elif stat == 'FV':
+        b = vertex_basis(irbasis.load('F', Lambda))
+    else:
+        raise RuntimeError("Invalid stat")
+
+    return b, Basis(b, beta)

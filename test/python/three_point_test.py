@@ -8,6 +8,8 @@ from irbasis_util.three_point import *
 from irbasis_util.internal import *
 from irbasis_util.regression import *
 
+from common import Gl_pole_F, Gl_pole_barB
+
 def G1_iw_pole_f(n, pole, beta):
     return 1/(1J * (2 * n + 1) * numpy.pi / beta - pole)
 
@@ -28,11 +30,11 @@ def _compute_G3pt_l(b3pt, pole, r):
     Nl = b3pt.Nl
     Gl = numpy.zeros((3, Nl, Nl))
     if r == 0:
-        Gl[r, :, :] = Gl_pole(b3pt.basis_beta_f, pole)[:Nl, None] * Gl_pole(b3pt.basis_beta_f, pole)[None, :Nl]
+        Gl[r, :, :] = Gl_pole_F(b3pt.basis_beta_f, pole)[:Nl, None] * Gl_pole_F(b3pt.basis_beta_f, pole)[None, :Nl]
     elif r == 1:
-        Gl[r, :, :] = Gl_pole(b3pt.basis_beta_b, pole)[:Nl, None] * Gl_pole(b3pt.basis_beta_f, pole)[None, :Nl]
+        Gl[r, :, :] = Gl_pole_barB(b3pt.basis_beta_b, pole)[:Nl, None] * Gl_pole_F(b3pt.basis_beta_f, pole)[None, :Nl]
     elif r == 2:
-        Gl[r, :, :] = Gl_pole(b3pt.basis_beta_f, pole)[:Nl, None] * Gl_pole(b3pt.basis_beta_b, pole)[None, :Nl]
+        Gl[r, :, :] = Gl_pole_F(b3pt.basis_beta_f, pole)[:Nl, None] * Gl_pole_barB(b3pt.basis_beta_b, pole)[None, :Nl]
     else:
         raise RuntimeError("Not supported")
 

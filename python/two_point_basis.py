@@ -18,7 +18,8 @@ def _compute_Tnl_norm_legendre(n, l):
 
 class augmented_basis_b(object):
     """
-    Augmented basis for boson (in terms of x, y)
+    Augmented basis for boson (defined in x, y domains)
+    Defined by Eq. (14) of Phys. Rev. B 97, 205111 (2018).
     """
     def __init__(self, basis_xy):
         """
@@ -44,7 +45,7 @@ class augmented_basis_b(object):
 
     @property
     def statistics(self):
-        return 'barB'
+        return 'B'
 
     def ulx(self, l, x):
         if l == 0:
@@ -77,6 +78,66 @@ class augmented_basis_b(object):
     def dim(self):
         return self._dim
 
+    def sampling_points_x(self, max_l):
+        return irbasis.sampling_points_x(self._bb, max_l+2)
+
+    def sampling_points_matsubara(self, max_l):
+        return irbasis.sampling_points_matsubara(self._bb, max_l+2)
+
+
+class vertex_basis(object):
+    """
+     Basis for two-point Green's function in terms of tau and omega.
+    The first basis function is a constant 1 in Matsubara frequency domain.
+    """
+    def __init__(self, b):
+        """
+
+        Parameters
+        ----------
+        b: object of irbasis
+        """
+        check_type(b, [irbasis.basis, augmented_basis_b])
+
+        self._b = b
+        self._dim = self._b.dim() + 1
+
+    @property
+    def Lambda(self):
+        return self._b.Lambda
+
+    @property
+    def statistics(self):
+        return self._b.statistics
+
+    def ulx(self, l, x):
+        if l == 0:
+            raise RuntimeError("ulx is not defined for l=0.")
+        else:
+            return self._b.ulx(l-1, x)
+
+    def sl(self, l):
+        if l == 0:
+            return self._b.sl(0)
+        else:
+            return self._b.sl(l-1)
+
+    def compute_unl(self, nvec):
+        num_n = len(nvec)
+        unl = numpy.zeros((num_n, self._dim), dtype=complex)
+        unl[:, 0] = 1
+        unl[:, 1:] = self._b.compute_unl(nvec)
+        return unl
+
+    def dim(self):
+        return self._dim
+
+    def sampling_points_x(self, max_l):
+        return irbasis.sampling_points_x(self._b, max_l+1)
+
+    def sampling_points_matsubara(self, max_l):
+        return irbasis.sampling_points_matsubara(self._b, max_l+1)
+
 class Basis(object):
     """
     Basis for two-point Green's function in terms of tau and omega
@@ -98,7 +159,7 @@ class Basis(object):
 
         if self._stat == 'F':
             self._sl_const = numpy.sqrt(0.5 * beta * self._wmax)
-        elif self._stat == 'B' or self._stat == 'barB':
+        elif self._stat == 'B':
             self._sl_const = numpy.sqrt(0.5 * beta * self._wmax**3)
         else:
             raise RuntimeError("Unknown statistics " + self._stat)
@@ -171,199 +232,16 @@ class Basis(object):
             Unl[i, :] = self._Unl_cache[nvec[i]]
         return Unl
 
-def sampling_points_leggauss(basis_beta, whichl, deg):
-    """
-    Computes the sample points and weights for composite Gauss-Legendre quadrature
-    according to the zeros of the given basis function
+    def sampling_points_tau(self, max_l):
+        """
+        Sparse sampling points in tau
 
-    Parameters
-    ----------
-    basis_beta : Basis
-        Basis object
-    whichl: int
-        Index of reference basis function "l"
-    deg: int
-        Number of sample points and weights between neighboring zeros
+        :param max_l: int
+           Max index l
+        :return: 1D array of float
+        """
+        return 0.5 * self._beta * (self._b.sampling_points_x(max_l) + 1)
 
-    Returns
-    -------
-    x : ndarray
-        1-D ndarray containing the sample points (in tau)
-    y : ndarray
-        1-D ndarray containing the weights.
+    def sampling_points_matsubara(self, max_l):
+        return self._b.sampling_points_matsubara(max_l)
 
-    """
-
-    check_type(basis_beta, [Basis])
-    ulx = lambda x: basis_beta.basis_xy.ulx(whichl, x)
-    section_edges = numpy.hstack((-1., find_zeros(ulx), 1.))
-
-    x, y = composite_leggauss(deg, section_edges)
-
-    return tau_for_x(x, basis_beta.beta), .5 * basis_beta.beta * y
-
-def _funique(x, tol=2e-16):
-    """Removes duplicates from an 1D array within tolerance"""
-    x = numpy.sort(x)
-    unique = numpy.ediff1d(x, to_end=2*tol) > tol
-    x = x[unique]
-    return x
-
-
-def _find_roots(ulx):
-    """Find all roots in (-1, 1) using double exponential mesh + bisection"""
-    Nx = 10000
-    eps = 1e-14
-    tvec = numpy.linspace(-3, 3, Nx)  # 3 is a very safe option.
-    xvec = numpy.tanh(0.5 * numpy.pi * numpy.sinh(tvec))
-
-    zeros = []
-    for i in range(Nx - 1):
-        if ulx(xvec[i]) * ulx(xvec[i + 1]) < 0:
-            a = xvec[i + 1]
-            b = xvec[i]
-            u_a = ulx(a)
-            u_b = ulx(b)
-            while a - b > eps:
-                half_point = 0.5 * (a + b)
-                if ulx(half_point) * u_a > 0:
-                    a = half_point
-                else:
-                    b = half_point
-            zeros.append(0.5 * (a + b))
-    return numpy.array(zeros)
-
-
-#def _find_roots(ulx_data, xoffset, tol=2e-16):
-    #"""Find all roots in the piecewise polynomial representation"""
-    #nsec, npoly = ulx_data.shape
-    #if xoffset.shape != (nsec+1,):
-        #raise ValueError("Invalid section edges shape")
-#
-    #xsegm = xoffset[1:] - xoffset[:-1]
-    #roots = []
-    #for i in range(nsec):
-        #x0s = numpy.roots(ulx_data[i, ::-1])
-        #x0s = [(x0 + xoffset[i]).real for x0 in x0s
-               #if -tol < x0 < xsegm[i]+tol and numpy.abs(x0.imag) < tol]
-        #roots += x0s
-#
-    #roots = numpy.asarray(roots)
-    #roots = numpy.hstack((-roots[::-1], roots))
-    #roots = _funique(roots, tol)
-    #return roots
-
-def sampling_points_x(basis_xy, whichl):
-    xroots =  _find_roots(lambda x: basis_xy.ulx(whichl, x))
-    xroots_ex = numpy.hstack((-1.0, xroots, 1.0))
-    return 0.5 * (xroots_ex[:-1] + xroots_ex[1:])
-
-def sampling_points_tau(basis_beta, whichl):
-    return 0.5 * basis_beta.beta * (sampling_points_x(basis_beta.basis_xy, whichl) + 1)
-
-def _start_guesses(n=1000):
-    "Construct points on a logarithmically extended linear interval"
-    x1 = numpy.arange(n)
-    x2 = numpy.array(numpy.exp(numpy.linspace(numpy.log(n), numpy.log(1E+8), n)), dtype=int)
-    x = numpy.unique(numpy.hstack((x1,x2)))
-    return x
-
-def _get_unl_real(basis_xy, x):
-    "Return highest-order basis function on the Matsubara axis"
-    unl = basis_xy.compute_unl(x)
-    result = numpy.zeros(unl.shape, float)
-
-    # Purely real functions
-    real_loc = 1 if basis_xy.statistics == 'F' else 0
-    assert numpy.allclose(unl[:, real_loc::2].imag, 0)
-    result[:, real_loc::2] = unl[:, real_loc::2].real
-
-    # Purely imaginary functions
-    imag_loc = 1 - real_loc
-    assert numpy.allclose(unl[:, imag_loc::2].real, 0)
-    result[:, imag_loc::2] = unl[:, imag_loc::2].imag
-    return result
-
-def _sampling_points(fn):
-    "Given a discretized 1D function, return the location of the extrema"
-    fn = numpy.asarray(fn)
-    fn_abs = numpy.abs(fn)
-    sign_flip = fn[1:] * fn[:-1] < 0
-    sign_flip_bounds = numpy.hstack((0, sign_flip.nonzero()[0] + 1, fn.size))
-    points = []
-    for segment in map(slice, sign_flip_bounds[:-1], sign_flip_bounds[1:]):
-        points.append(fn_abs[segment].argmax() + segment.start)
-    return numpy.asarray(points)
-
-def _full_interval(sample, stat):
-    if stat == 'F':
-        return numpy.hstack((-sample[::-1]-1, sample))
-    else:
-        # If we have a bosonic basis and even order (odd maximum), we have a
-        # root at zero. We have to artifically add that zero back, otherwise
-        # the condition number will blow up.
-        if sample[0] == 0:
-            sample = sample[1:]
-        return numpy.hstack((-sample[::-1], 0, sample))
-
-def get_mats_sampling(basis_xy, lmax=None):
-    "Generate Matsubara sampling points from extrema of basis functions"
-    if lmax is None: lmax = basis_xy.dim()-1
-
-    x = _start_guesses()
-    y = _get_unl_real(basis_xy, x)[:,lmax]
-    x_idx = _sampling_points(y)
-
-    sample = x[x_idx]
-    return _full_interval(sample, basis_xy.statistics)
-
-def sampling_points_matsubara(basis_beta, whichl):
-    """
-    Computes "optimal" sampling points in Matsubara domain for given basis
-
-    Parameters
-    ----------
-    basis_beta : Basis
-        Basis object
-    whichl: int
-        Index of reference basis function "l"
-
-    Returns
-    -------
-    sampling_points: list of int
-        List of sampling points in Matsubara domain
-
-    """
-    check_type(basis_beta, Basis)
-
-    basis = basis_beta.basis_xy
-    stat = basis.statistics
-    beta = basis_beta.beta
-
-    assert stat == 'F' or stat == 'B' or stat == 'barB'
-
-    whichl_t = whichl
-    if stat == 'barB':
-        whichl_t = whichl + 2
-
-    if whichl_t > basis_beta.max_l:
-        raise RuntimeError("Too large whichl")
-
-    return get_mats_sampling(basis, whichl_t)
-
-def Gl_pole(B, pole):
-    assert isinstance(B, Basis)
-    Sl = numpy.array([B.Sl(l) for l in range(B.dim)])
-    if B.statistics == 'F':
-        Vlpole = numpy.array([B.Vlomega(l, pole) for l in range(B.dim)])
-        return -Sl * Vlpole
-    elif B.statistics == 'B':
-        assert pole != 0
-        Vlpole = numpy.array([B.Vlomega(l, pole) for l in range(B.dim)])
-        return -Sl * Vlpole / pole
-    elif B.statistics == 'barB':
-        assert pole != 0
-        Vlpole = numpy.zeros((B.dim))
-        Vlpole[2:] = numpy.sqrt(1 / B.wmax) * numpy.array([B.basis_xy.basis_b.vly(l, pole / B.wmax)
-                                                               for l in range(B.dim-2)])
-        return -Sl * Vlpole / pole

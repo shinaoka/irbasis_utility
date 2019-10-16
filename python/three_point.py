@@ -83,8 +83,8 @@ class ThreePoint(object):
         """
         Return sampling points in two-fermion-frequency convention
         """
-        sp_o_f = 2*sampling_points_matsubara(self._Bf, whichl) + 1
-        sp_o_b = 2*sampling_points_matsubara(self._Bb, whichl)
+        sp_o_f = 2*sampling_points_matsubara(self._Bf.basis_xy, whichl) + 1
+        sp_o_b = 2*sampling_points_matsubara(self._Bb.basis_xy, whichl)
         sp_o = []
         Nf = len(sp_o_f)
         Nb = len(sp_o_b)
