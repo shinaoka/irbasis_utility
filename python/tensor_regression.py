@@ -210,25 +210,32 @@ def linear_operator_r(N1, N2, tensors_A, x_r, xs_l, x_orb):
 
     freq_dim = len(tensors_A)
     # O(Nw D R Nl)
-    # 3* 10^5 * 100 * 10 * 30 = 10^10
     tmp_wrd = numpy.full((num_w, R, D), complex(1.0))
     for i in range(freq_dim):
         tmp_wrd *= numpy.einsum('wrl, dl -> wrd', tensors_A[i], xs_l[i], optimize=True)
 
     def matvec(x):
         x = x.reshape((D, R))
+        t1 = time.time()
         # (wrd) * (dr) => (wd): O(Nw D R)
         tmp_wd_ = numpy.einsum('wrd, dr->wd', tmp_wrd, x, optimize=True)
+        t2 = time.time()
         # (wd) * (do) => (wo): O(Nw D No)
         tmp_wo_ = numpy.einsum('wd, do->wo', tmp_wd_, x_orb, optimize=True).ravel()
+        t3 = time.time()
+        #print("debug A", MPI.COMM_WORLD.Get_rank(), t2-t1, t3-t2)
         return tmp_wo_
 
     def rmatvec(y):
         y_c = y.reshape((num_w, num_o)).conjugate()
+        t1 = time.time()
         # O(Nw D No)
         tmp_wd_ = numpy.einsum('do, wo -> wd', x_orb, y_c, optimize=True)
+        t2 = time.time()
         # O(Nw D R)
         x_c = numpy.einsum('wrd, wd -> dr', tmp_wrd, tmp_wd_, optimize=True).ravel()
+        t3 = time.time()
+        #print("debug B", MPI.COMM_WORLD.Get_rank(), t2-t1, t3-t2)
         return x_c.conjugate()
 
     return LinearOperator((N1, N2), matvec=matvec, rmatvec=rmatvec)
@@ -248,7 +255,8 @@ def linear_operator_l(N1, N2, tensors_A_masked, tensors_A_pos, x_r, xs_l_masked,
     tmp_wrd1 = numpy.einsum('wrd, dr->wrd', tmp_wrd1, x_r, optimize=True)
     tmp_wdn = numpy.einsum('wrd, wrn->wdn', tmp_wrd1, tensors_A_pos, optimize=True)
 
-    tmp_wdn_2 = numpy.empty_like(tmp_wdn)
+    tmp_wd = numpy.zeros((num_w, D), dtype=complex)
+    tmp_wdn_conj = numpy.conj(tmp_wdn)
 
     t2 = time.time()
    
@@ -261,16 +269,14 @@ def linear_operator_l(N1, N2, tensors_A_masked, tensors_A_pos, x_r, xs_l_masked,
         x = x.reshape((D, linear_dim))
         # O(Nw D Nl)
         # 'dn, wdn -> wd'
-        tmp_wdn_2[:,:,:] = x[None, :, :] * tmp_wdn
+        tmp_wd[:,:] = numpy.einsum('dn,wdn->wd', x, tmp_wdn, optimize=True)
         t2 = time.time()
-        tmp_wd = numpy.sum(tmp_wdn_2, axis=2)
-        t3 = time.time()
         # O(Nw D No)
         #  'wd, do -> wo'
         tmp_wo = numpy.dot(tmp_wd, x_orb).ravel()
-        t4 = time.time()
+        t3 = time.time()
         #if MPI.COMM_WORLD.Get_rank() == 0:
-            #print("debug A", MPI.COMM_WORLD.Get_rank(), t2-t1, t3-t2, tmp_wd.shape, x_orb.shape)
+        #print("debug A", MPI.COMM_WORLD.Get_rank(), t2-t1, t3-t2, tmp_wd.shape, x_orb.shape)
         return tmp_wo
 
     def rmatvec(y):
@@ -284,11 +290,10 @@ def linear_operator_l(N1, N2, tensors_A_masked, tensors_A_pos, x_r, xs_l_masked,
         tmp_wd = numpy.dot(y, numpy.conj(x_orb).transpose())
         t2 = time.time()
         # O(Nw D Nl)
-        #  Equivalent to tmp_dn = numpy.einsum('wd, wdn -> dn', tmp_wd, numpy.conj(tmp_wdn), optimize=True)
-        tmp_dn = numpy.sum(tmp_wd[:,:,None] * numpy.conj(tmp_wdn), axis=0)
+        tmp_dn = numpy.einsum('wd, wdn -> dn', tmp_wd, tmp_wdn_conj, optimize=True)
         t3 = time.time()
         #if MPI.COMM_WORLD.Get_rank() == 0:
-            #print("debug B", MPI.COMM_WORLD.Get_rank(), t2-t1, t3-t2)
+        #print("debug B", MPI.COMM_WORLD.Get_rank(), t2-t1, t3-t2)
         return tmp_dn.ravel()
 
     return LinearOperator((N1, N2), matvec=matvec, rmatvec=rmatvec)
