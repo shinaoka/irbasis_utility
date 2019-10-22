@@ -51,6 +51,7 @@ parser.add_argument('--seed', default=1, type=int, help='seed')
 parser.add_argument('--nesterov', default=True, type=bool, help='nesterov')
 parser.add_argument('--alpha', default=1e-8, type=float, help='regularization parameter')
 parser.add_argument('--scut', default=1e-4, type=float, help='Cutoff value for singular values')
+parser.add_argument('--vertex', default=False, type=bool, help='Vertex or not')
 
 args = parser.parse_args()
 if os.path.isfile(args.path_input_file) is False:
@@ -83,9 +84,6 @@ basis = irbasis.load('F', Lambda)
 tmp = numpy.sqrt(numpy.sum(numpy.abs(G2iwn)**2, axis=-1)).ravel()
 orb_idx = tmp/numpy.amax(tmp) > 1e-5
 num_o_nonzero = numpy.sum(orb_idx)
-if rank == 0:
-    print("Num of active orbital components = ", num_o_nonzero)
-    print("Num of freqs = ", n_freqs)
 
 sizes, offsets = mpi_split(n_freqs, comm.size)
 n_freqs_local = sizes[rank]
@@ -94,11 +92,17 @@ G2iwn_local = G2iwn[:,start:end]
 
 wmax = Lambda / beta
 
-phb = FourPoint(Lambda, beta, args.scut, True)
+phb = FourPoint(Lambda, beta, args.scut, True, vertex=args.vertex)
 Nl = phb.Nl
 
 sp_local = numpy.array(freqs)[start:end,:]
 sp_local = [tuple(sp_local[i,:]) for i in range(sp_local.shape[0])]
+
+if rank == 0:
+    print("Num of active orbital components = ", num_o_nonzero)
+    print("Num of freqs = ", n_freqs)
+    print("Vertex = ", args.vertex)
+    print("Nl = ", Nl)
 
 # Regression
 def perform_fit(tensors_A, y, Ds, cutoff=1e-5):
@@ -109,6 +113,7 @@ def perform_fit(tensors_A, y, Ds, cutoff=1e-5):
     for i, D in enumerate(Ds):
         if rank == 0:
             print("D ", D)
+        print("Calling fit for D={}...".format(D))
         xs = fit(y[:, orb_idx], tensors_A, D, args.niter, rtol=1e-8, alpha=args.alpha, verbose=1, random_init=True, comm=comm, seed=args.seed, nesterov=args.nesterov)
         x_orb_full = numpy.zeros((D, num_o), dtype=complex)
         x_orb_full[:, orb_idx] = xs[-1]

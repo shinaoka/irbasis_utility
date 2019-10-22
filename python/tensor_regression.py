@@ -248,6 +248,8 @@ def linear_operator_l(N1, N2, tensors_A_masked, tensors_A_pos, x_r, xs_l_masked,
     tmp_wrd1 = numpy.einsum('wrd, dr->wrd', tmp_wrd1, x_r, optimize=True)
     tmp_wdn = numpy.einsum('wrd, wrn->wdn', tmp_wrd1, tensors_A_pos, optimize=True)
 
+    tmp_wdn_2 = numpy.empty_like(tmp_wdn)
+
     t2 = time.time()
    
     def matvec(x):
@@ -259,12 +261,14 @@ def linear_operator_l(N1, N2, tensors_A_masked, tensors_A_pos, x_r, xs_l_masked,
         x = x.reshape((D, linear_dim))
         # O(Nw D Nl)
         # 'dn, wdn -> wd'
-        tmp_wd = numpy.sum(x[None, :, :] * tmp_wdn, axis=2)
+        tmp_wdn_2[:,:,:] = x[None, :, :] * tmp_wdn
         t2 = time.time()
+        tmp_wd = numpy.sum(tmp_wdn_2, axis=2)
+        t3 = time.time()
         # O(Nw D No)
         #  'wd, do -> wo'
         tmp_wo = numpy.dot(tmp_wd, x_orb).ravel()
-        t3 = time.time()
+        t4 = time.time()
         #if MPI.COMM_WORLD.Get_rank() == 0:
             #print("debug A", MPI.COMM_WORLD.Get_rank(), t2-t1, t3-t2, tmp_wd.shape, x_orb.shape)
         return tmp_wo
@@ -289,12 +293,12 @@ def linear_operator_l(N1, N2, tensors_A_masked, tensors_A_pos, x_r, xs_l_masked,
 
     return LinearOperator((N1, N2), matvec=matvec, rmatvec=rmatvec)
 
-def __ridge_complex_lsqr(N1, N2, A, y, alpha, num_data=1, verbose=0, x0=None, atol=None, comm=None):
+def __ridge_complex_lsqr(N1, N2, A, y, alpha, num_data=1, verbose=0, x0=None, comm=None):
     from .lsqr import lsqr
     if is_enabled_MPI:
         if comm is None:
             raise RuntimeError("comm is None")
-    r = lsqr(A, y.ravel(), damp=numpy.sqrt(alpha), x0=x0, atol_r1norm=atol, comm=comm)
+    r = lsqr(A, y.ravel(), damp=numpy.sqrt(alpha), x0=x0, comm=comm)
     return r[0]
 
 def __normalize_tensor(tensor):
@@ -596,8 +600,6 @@ def fit(y, prj, D, nite,  rtol = 1e-3, verbose=0, random_init=True, x0=None, alp
         norm_y = numpy.linalg.norm(y)
         num_w_tot = num_w
 
-    atol_lsqr = None
-
     def _to_x_tensors(x):
         tmp = x.reshape((2, -1))
         x1d = tmp[0, :] + 1J * tmp[1, :]
@@ -654,7 +656,7 @@ def fit(y, prj, D, nite,  rtol = 1e-3, verbose=0, random_init=True, x0=None, alp
         Build a least squares model for optimizing core tensor
         """
         A_op = linear_operator_r(num_w*num_o, D*num_rep, prj, x_r, xs_l, x_orb)
-        x_r[:,:] = __ridge_complex_lsqr(num_w*num_o, D * num_rep, A_op, y, alpha, atol=atol_lsqr, comm=comm).reshape((D, num_rep))
+        x_r[:,:] = __ridge_complex_lsqr(num_w*num_o, D * num_rep, A_op, y, alpha, comm=comm).reshape((D, num_rep))
 
     def update_l_tensor(pos, x_r, xs_l, x_orb):
         assert pos >= 0
@@ -671,7 +673,7 @@ def fit(y, prj, D, nite,  rtol = 1e-3, verbose=0, random_init=True, x0=None, alp
         t2 = time.time()
         xs_l[pos][:,:] = __ridge_complex_lsqr(num_w*num_o, D*linear_dim, A_op, y, alpha,
                                                     x0=xs_l[pos].ravel(),
-                                                    atol=atol_lsqr, comm=comm).reshape((D, linear_dim))
+                                                    comm=comm).reshape((D, linear_dim))
         t3 = time.time()
         if verbose >= 2:
             print("rest : time ", t2-t1, t3-t2)
@@ -700,7 +702,7 @@ def fit(y, prj, D, nite,  rtol = 1e-3, verbose=0, random_init=True, x0=None, alp
         N1, N2 = num_w*num_o, D*num_o
         A_lsm_op = LinearOperator((N1, N2), matvec=matvec, rmatvec=rmatvec)
         x_orb[:, :] = __ridge_complex_lsqr(N1, N2, A_lsm_op, y,
-                                                 alpha, atol=atol_lsqr, comm=comm).reshape((D, num_o))
+                                                 alpha, comm=comm).reshape((D, num_o))
 
 
     def als(x):

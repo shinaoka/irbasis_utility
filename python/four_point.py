@@ -19,14 +19,21 @@ idx_n1n2n4_FBF = [numpy.array((p[0], p[1], p[3])) for p in permutations([0, 1, 2
 
 
 class FourPoint(object):
-    def __init__(self, Lambda, beta, cutoff = 1e-8, augmented=True):
+    def __init__(self, Lambda, beta, cutoff = 1e-8, augmented=True, vertex=False):
         self._Lambda = Lambda
         self._beta = beta
-        self._Bf = Basis(irbasis.load('F', Lambda), beta, cutoff)
+
+        bf = irbasis.load('F', Lambda)
+        bb = irbasis.load('B', Lambda)
         if augmented:
-            self._Bb = Basis(augmented_basis_b(irbasis.load('B', Lambda)), beta, cutoff)
-        else:
-            self._Bb = Basis(irbasis.load('B', Lambda), beta, cutoff)
+            bb = augmented_basis_b(bb)
+        if vertex:
+            bf = vertex_basis(bf)
+            bb = vertex_basis(bb)
+
+        self._Bf = Basis(bf, beta, cutoff)
+        self._Bb = Basis(bb, beta, cutoff)
+
         # DG: the below is tantamount to using a larger cutoff
         # for one of the basis
         self._Nl = min(self._Bf.dim, self._Bb.dim)

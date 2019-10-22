@@ -91,7 +91,6 @@ class TestMethods(unittest.TestCase):
         pole = 0.2 * wmax
         # build the sampling frequency structure
         sp = b4pt.sampling_points_matsubara(whichl)
-        S = b4pt.normalized_S()
         n_sp = len(sp)
         prj = numpy.array(b4pt.projector_to_matsubara_vec(sp))[:, :,  :, :]
         prj_mat = prj[:, :, :, :].reshape((n_sp, 16 * Nl**3))
@@ -102,6 +101,7 @@ class TestMethods(unittest.TestCase):
         for i, j, k in product(range(-niw, niw, 10), repeat=3):
             n1234_check.append((i, j, k, - i - j - k - 2))
         prj_check = numpy.array(b4pt.projector_to_matsubara_vec(n1234_check))[:, :, :, :]
+
         # Test No. 1, 2, 5, 6
         for r in [0, 1, 4, 5]:
             Giwn = numpy.array([ _compute_G4pt_iw(beta, pole, r, n1234) for n1234 in sp])

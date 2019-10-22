@@ -96,7 +96,7 @@ def _sym_ortho(a, b):
 
 
 def lsqr(A, b, damp=0.0, atol=1e-8, btol=1e-8, conlim=1e8,
-         iter_lim=None, show=False, calc_var=False, x0=None, comm=None, atol_r1norm=None):
+         iter_lim=None, show=False, calc_var=False, x0=None, comm=None):
     """Find the least-squares solution to a large, sparse, linear system
     of equations.
 
@@ -338,10 +338,10 @@ def lsqr(A, b, damp=0.0, atol=1e-8, btol=1e-8, conlim=1e8,
         if 1 + t1 <= 1:
             istop = 4
 
-        if not r1norm_old is None:
-            if abs(abs(r1norm) - r1norm_old) < atol_r1norm:
-                istop = 99
-        r1norm_old = abs(r1norm)
+        #if not r1norm_old is None:
+            #if abs(abs(r1norm) - r1norm_old) < atol_r1norm:
+                #istop = 99
+        #r1norm_old = abs(r1norm)
 
         # Allow for tolerances set by the user.
         if test3 <= ctol:
