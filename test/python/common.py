@@ -1,7 +1,7 @@
 from __future__ import print_function
 import numpy
 import irbasis
-from irbasis_util.two_point_basis import augmented_basis_b, vertex_basis, Basis
+from irbasis_util.two_point_basis import augmented_basis_b, vertex_basis, augmented_ortho_basis_b, Basis
 
 # G. Rohringer et al., PRB 86, 125114 (2012)
 
@@ -65,8 +65,12 @@ def load_basis(stat, Lambda, beta):
         b = irbasis.load(stat, Lambda)
     elif stat == 'barB':
         b = augmented_basis_b(irbasis.load('B', Lambda))
+    elif stat == 'orthobarB':
+        b = augmented_ortho_basis_b(irbasis.load('B', Lambda))
     elif stat == 'barBV':
         b = vertex_basis(augmented_basis_b(irbasis.load('B', Lambda)))
+    elif stat == 'orthobarBV':
+        b = vertex_basis(augmented_ortho_basis_b(irbasis.load('B', Lambda)))
     elif stat == 'FV':
         b = vertex_basis(irbasis.load('F', Lambda))
     else:

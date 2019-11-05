@@ -47,7 +47,7 @@ def sampling_points_leggauss(basis_beta, whichl, deg):
     return tau_for_x(x, basis_beta.beta), .5 * basis_beta.beta * y
 
 
-all_stat = ['F', 'B', 'barB']
+all_stat = ['F', 'B', 'barB', 'orthobarB']
 
 class TestMethods(unittest.TestCase):
     def __init__(self, *args, **kwargs):

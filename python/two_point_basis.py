@@ -84,6 +84,92 @@ class augmented_basis_b(object):
     def sampling_points_matsubara(self, max_l):
         return irbasis.sampling_points_matsubara(self._bb, max_l+2)
 
+class augmented_ortho_basis_b(object):
+    """
+    Augmented basis for boson (defined in x, y domains)
+    Defined by Eq. (14) of Phys. Rev. B 97, 205111 (2018).
+    But orthonormalized.
+    """
+    def __init__(self, basis_xy):
+        """
+        Contructs an object representing augmented basis for boson
+
+        Parameters
+        ----------
+        basis_xy: object of irbasis (boson)
+        """
+        check_type(basis_xy, irbasis.basis)
+        check_value(basis_xy.statistics, 'B')
+
+        self._bb = basis_xy
+        self._dim = self._bb.dim()
+
+        self._ulx_tmp = numpy.zeros((self._dim+2,))
+        self._uln_tmp = numpy.zeros((self._dim+2,), dtype=complex)
+
+        # Gram–Schmidt orthonormalization
+        # TODO: make use of even/odd properties
+        self._coeff = numpy.eye(self._dim, self._dim+2)
+        deg = 20
+        dim2 = self._dim + 2
+        edges = numpy.hstack((-1, self._bb.sampling_points_x(self._bb.dim()-1) , 1))
+        xs, ws = composite_leggauss(deg, edges)
+        nsp = len(xs)
+        fx_tmp = numpy.zeros((nsp, self._dim+2))
+        fx_tmp[:, 0] = numpy.sqrt(0.5)
+        fx_tmp[:, 1] = numpy.sqrt(1.5) * xs
+        fx_tmp[:, 2:] = self._bb.ulx(numpy.arange(self._dim)[:,None], xs[None,:]).transpose()
+        overlap = numpy.einsum('xm,x,xl->ml', fx_tmp, ws, fx_tmp)
+        numpy.testing.assert_allclose(numpy.diag(overlap), numpy.ones(self._bb.dim()+2))
+        for l in range(2, self._dim):
+            # (1, dim2) * (dim2, dim2) * (dim2, l) = (1, l)
+            overlap_tmp = numpy.dot(numpy.dot(self._coeff[l,:].reshape((1,dim2)), overlap), self._coeff[:l,:].transpose())
+
+            # (1,l) * (l, dim2) = (1, dim2)
+            self._coeff[l, :] -= numpy.dot(overlap_tmp, self._coeff[:l, :]).reshape((dim2,))
+
+
+    @property
+    def Lambda(self):
+        return self._bb.Lambda
+
+    @property
+    def basis_b(self):
+        return self._bb
+
+    @property
+    def statistics(self):
+        return 'B'
+
+    def ulx(self, l, x):
+        self._ulx_tmp[0] = numpy.sqrt(0.5)
+        self._ulx_tmp[1] = numpy.sqrt(1.5) * x
+        for l2 in range(self._dim):
+            self._ulx_tmp[l2+2] = self._bb.ulx(l2, x)
+        return numpy.dot(self._coeff[l,:], self._ulx_tmp)
+
+    def sl(self, l):
+        if l == 0 or l == 1:
+            return self._bb.sl(0)
+        else:
+            return self._bb.sl(l-2)
+
+    def compute_unl(self, nvec):
+        num_n = len(nvec)
+        unl = numpy.zeros((num_n, self._dim+2), dtype=complex)
+        unl[:, 0:2] = numpy.array([_compute_Tnl_norm_legendre(n, l) for n in nvec for l in range(2)]).reshape(num_n, 2)
+        unl[:, 2:] = self._bb.compute_unl(nvec)
+        return numpy.dot(unl, self._coeff.transpose())
+
+    def dim(self):
+        return self._dim
+
+    def sampling_points_x(self, max_l):
+        return irbasis.sampling_points_x(self._bb, max_l+2)
+
+    def sampling_points_matsubara(self, max_l):
+        return irbasis.sampling_points_matsubara(self._bb, max_l+2)
+
 
 class vertex_basis(object):
     """
