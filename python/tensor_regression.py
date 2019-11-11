@@ -120,7 +120,7 @@ def linear_operator_l(N1, N2, tensors_A_masked, tensors_A_pos, x_r, xs_l_masked,
     for i in range(freq_dim-1):
         tmp_wrd1 *= numpy.einsum('wrl, dl -> wrd', tensors_A_masked[i], xs_l_masked[i], optimize=True)
     tmp_wrd1 = numpy.einsum('wrd, dr->wrd', tmp_wrd1, x_r, optimize=True)
-    # tmp_wdn: B′(W, d, l1)
+    # tmp_wdn: (W, d, l1)
     tmp_wdn = numpy.einsum('wrd, wrn->wdn', tmp_wrd1, tensors_A_pos, optimize=True)
 
     tmp_wd = numpy.zeros((num_w, D), dtype=complex)
