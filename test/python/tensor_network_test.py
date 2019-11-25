@@ -3,6 +3,7 @@ from __future__ import print_function
 import unittest
 import numpy
 from irbasis_util.tensor_network import Tensor, TensorNetwork, conj_a_b
+from irbasis_util.auto_als import AutoALS
 
 
 class TestMethods(unittest.TestCase):
@@ -30,6 +31,8 @@ class TestMethods(unittest.TestCase):
         B = Tensor("B", (N2, N3), True)
         tn = TensorNetwork([A, B], [(0,1),(1,2)])
 
+        self.assertEqual(tn.find_tensor(B), 1)
+
         numpy.testing.assert_allclose(tn.external_subscripts, numpy.array([0,2]))
 
         tn.find_contraction_path(True)
@@ -41,10 +44,22 @@ class TestMethods(unittest.TestCase):
         val_ref = numpy.einsum('ij,jk->ik', vals['A'], vals['B'].conjugate())
         numpy.testing.assert_allclose(val, val_ref)
 
+    def test_tensor_network_removal(self):
+        N1, N2, N3 = 10, 20, 30
+        # A_{01} (B_{12})
+        A = Tensor("A", (N1, N2))
+        B = Tensor("B", (N2, N3))
+        tn = TensorNetwork([A, B], [(0,1),(1,2)])
+        tn2 = tn.remove(B)
+
+        assert tn2.tensors == [A]
+        assert tn2.subscripts == [(0,1)]
+
     def test_conj_a_b(self):
         """
 
         """
+        numpy.random.seed(100)
         N = 10
         a1 = Tensor("a1", (N, N, N))
         a2 = Tensor("a2", (N, N, N))
@@ -69,6 +84,30 @@ class TestMethods(unittest.TestCase):
         c.find_contraction_path()
         cv2 = c.evaluate({"a1" : a1v, "a2" : a2v, "b1" : b1v, "b2" : b2v})
         self.assertAlmostEqual(cv, cv2)
+
+    def test_auto_als(self):
+        numpy.random.seed(100)
+
+        N1, N2, N3, N4 = 20, 20, 1, 2
+        y1 = Tensor("y1", (N1, N2))
+        y = TensorNetwork([y1], [(0,1)])
+
+        a = Tensor("a", (N1, N3))
+        x = Tensor("x", (N3, N4))
+        b = Tensor("b", (N4, N2))
+        tilde_y = TensorNetwork([a, x, b], [(0,2),(2,3),(3,1)])
+
+        auto_als = AutoALS(y, tilde_y, [x])
+
+        values = {}
+        values['y1'] = numpy.random.randn(N1, N2)
+        values['a'] = numpy.random.randn(N1, N3)
+        values['x'] = numpy.random.randn(N3, N4)
+        values['b'] = numpy.random.randn(N4, N2)
+
+        auto_als.fit(niter=100, tensors_value=values)
+
+
 
 
 if __name__ == '__main__':

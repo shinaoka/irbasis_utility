@@ -67,6 +67,12 @@ class Tensor(object):
         """
         return self._is_conj
 
+    def __eq__(self, other):
+        if isinstance(other, Tensor):
+            return self.__dict__ == other.__dict__
+        return False
+
+
 
 class TensorNetwork(object):
     def __init__(self, tensors, subscripts):
@@ -88,28 +94,31 @@ class TensorNetwork(object):
                 raise RuntimeError("Dimension mismatch")
 
         unique_subscripts = numpy.unique(sum(subscripts, ()))
-        num_subscripts = len(unique_subscripts)
-        if numpy.amax(unique_subscripts) >= num_subscripts:
-            raise RuntimeError("Subscripts must be smaller than the number of unique subscripts.")
-        if numpy.amin(unique_subscripts) < 0:
-            raise RuntimeError("Subscripts must be 0 or positive.")
 
         # Mark external subscript
         #  An external subscript appears only once.
-        counter_subscripts = numpy.zeros(num_subscripts, dtype=int)
-        for s in sum(subscripts, ()):
-            counter_subscripts[s] += 1
-        self._is_external_subscript = numpy.array(counter_subscripts == 1)
-        self._external_subscripts = unique_subscripts[self._is_external_subscript]
+        all_subscripts = numpy.array(sum(subscripts, ()))
+        self._is_external_subscript = []
+        for s in unique_subscripts:
+            self._is_external_subscript.append(numpy.count_nonzero(all_subscripts==s) == 1)
+
+        self._external_subscripts = tuple(unique_subscripts[self._is_external_subscript])
 
         self._tensors = tensors
-        self._unique_subscripts = unique_subscripts
+        self._unique_subscripts = tuple(unique_subscripts)
         self._num_tensors = len(tensors)
         self._subscripts = subscripts
         self._contraction_path = None
 
+        # Mapping from subscripts to alphabets
+        self._map_subscript_char = {}
+        for idx, subscript in enumerate(self._unique_subscripts):
+            self._map_subscript_char[subscript] = _to_alphabet(idx)
+        print("map", self._map_subscript_char)
+
         # Create str ver. of subscripts
-        ints_to_alphabets = lambda integers: ''.join(map(_to_alphabet, integers))
+        f = lambda x : self._map_subscript_char[x]
+        ints_to_alphabets = lambda x: ''.join(map(f, x))
         left_str = ','.join(map(ints_to_alphabets, self._subscripts))
         right_str = ints_to_alphabets(self._external_subscripts)
         self._str_sub = left_str + '->' + right_str
@@ -141,8 +150,8 @@ class TensorNetwork(object):
         """
 
         dummy_arrays = [numpy.empty(t.shape) for t in self._tensors]
-        print(self._str_sub)
-        print(len(dummy_arrays))
+        #print(self._str_sub)
+        #print(len(dummy_arrays))
         self._contraction_path, string_repr = numpy.einsum_path(self._str_sub, *dummy_arrays, optimize=('optimal', 1E+18))
 
         if verbose:
@@ -164,12 +173,63 @@ class TensorNetwork(object):
 
         arrays = []
         for t in self.tensors:
+            if t.shape != values_of_tensors[t.name].shape:
+                raise RuntimeError("Dimension mismatch between tensors and values_of_tensors!")
             if t.is_conj:
                 arrays.append(values_of_tensors[t.name].conjugate())
             else:
                 arrays.append(values_of_tensors[t.name])
 
-        return numpy.einsum(self._str_sub, *arrays, optimize=self._contraction_path)
+        print("str_sub", self._str_sub, self._tensors)
+        r = numpy.einsum(self._str_sub, *arrays, optimize=self._contraction_path)
+        print("r shape", r.shape)
+        return r
+
+    def find_tensor(self, tensor):
+        """
+        Find the given tensor
+        :param tensor: Tensor
+          Tensor
+        :return:
+          Index of the first tensor that equals to the given tensor
+        TODO: Does not work if there are multiple tensors match the given tensor
+        """
+
+        assert isinstance(tensor, Tensor)
+        return self._tensors.index(tensor)
+
+    def tensor_subscripts(self, tensor):
+        """
+        Return the subscripts for a given tensor
+        TODO: Does not work if there are multiple tensors match the given tensor
+        """
+
+        return self._subscripts[self._tensors.index(tensor)]
+
+    def remove(self, tensor_to_be_removed):
+        """
+        Make a new tensor network object by removing a tensor
+
+        :param tensors_to_be_removed: Tensor or list of tensors
+           Tensor(s) to be removed.
+        :return:
+           New tensor network object
+        """
+
+        if isinstance(tensor_to_be_removed, list):
+            if len(tensor_to_be_removed) > 1:
+                return self.remove(tensor_to_be_removed[0]).remove(tensor_to_be_removed[1:])
+            else:
+                return self.remove(tensor_to_be_removed[0])
+
+        new_tensors = []
+        new_subscripts = []
+        for t, s in zip(self.tensors, self.subscripts):
+            if t == tensor_to_be_removed:
+                continue
+            new_tensors.append(t)
+            new_subscripts.append(s)
+        return TensorNetwork(new_tensors, new_subscripts)
 
 def conj_a_b(a, b):
     """
@@ -189,32 +249,32 @@ def conj_a_b(a, b):
     num_idx_b = len(b.unique_subscripts)
 
     # Create map from old subscripts to new subscripts
-    new_subscripts_a = numpy.empty(num_idx_a, dtype=int)
-    new_subscripts_b = numpy.empty(num_idx_b, dtype=int)
+    new_subscripts_a = {}
+    new_subscripts_b = {}
 
     # External indices
     next_new_subscript = 0
-    for i, subscript in enumerate(a.unique_subscripts):
+    for subscript in a.unique_subscripts:
         if subscript in a.external_subscripts:
-            new_subscripts_a[i] = next_new_subscript
+            new_subscripts_a[subscript] = next_new_subscript
             next_new_subscript += 1
 
     next_new_subscript = 0
-    for i, subscript in enumerate(b.unique_subscripts):
+    for subscript in b.unique_subscripts:
         if subscript in b.external_subscripts:
-            new_subscripts_b[i] = next_new_subscript
+            new_subscripts_b[subscript] = next_new_subscript
             next_new_subscript += 1
 
     # Internal indices in a
-    for i, subscript in enumerate(a.unique_subscripts):
+    for subscript in a.unique_subscripts:
         if not subscript in a.external_subscripts:
-            new_subscripts_a[i] = next_new_subscript
+            new_subscripts_a[subscript] = next_new_subscript
             next_new_subscript += 1
 
     # Internal indices in b
-    for i, subscript in enumerate(b.unique_subscripts):
+    for subscript in b.unique_subscripts:
         if not subscript in b.external_subscripts:
-            new_subscripts_b[i] = next_new_subscript
+            new_subscripts_b[subscript] = next_new_subscript
             next_new_subscript += 1
 
     num_new_subscripts = num_idx_a + num_idx_b - num_ext_idx
@@ -229,14 +289,47 @@ def conj_a_b(a, b):
     f = lambda x: new_subscripts_b[x]
     new_subscripts.extend([tuple(map(f, tp)) for tp in b.subscripts])
 
-    #print(new_tensors)
-    #print(len(new_tensors))
-    #print(new_subscripts)
-    #print(len(new_subscripts))
     return TensorNetwork(new_tensors, new_subscripts)
 
 
+def differenciate(tensor_network, tensors):
+    """
+    Differenciate a tensor network w.r.t tensor(s).
 
+    :param tensor_network: TensorNetwork
+        Tensor network to be differentiated
+    :param tensors: Tensor
+        Tensors
+    :return:
+        A Lambda function which returns a ndarray or a LinearOperator for a given set of tensor values.
+    """
+    if isinstance(tensors, Tensor):
+        tensors = [tensors]
 
+    for target_t in tensors:
+        num_match = len([t for t in tensor_network.tensors if t==target_t])
+        if num_match == 0:
+           raise RuntimeError("Tensor not found")
+        if num_match > 1:
+            raise RuntimeError("Unsupported: Multiple tensors match!")
 
+    for i1, t1 in enumerate(tensors):
+        for i2, t2 in enumerate(tensors):
+            if i1 >= i2:
+                continue
+            if t1 == t2:
+                raise RuntimeError("Unsupported: tensors must not contain multiple equivalent tensors.")
+
+    tensor_subscripts = [tensor_network.tensor_subscripts(t) for t in tensors]
+
+    all_subscripts = sum([list(t) for t in tensor_subscripts], [])
+    if len(all_subscripts) == len(numpy.unique(all_subscripts)):
+        #If tensors share no subscript, the result of differentiation is a generator of matrix.
+        d_tnw = tensor_network.remove(tensors)
+        d_tnw.find_contraction_path()
+        transpose_axes = tuple([d_tnw.external_subscripts.index(s) for s in all_subscripts])
+        return lambda x : d_tnw.evaluate(x).transpose(transpose_axes)
+    else:
+        # This function should return a generator of scipy.sparse.linalg.LinearOperator.
+        raise RuntimeError("Unsupported: tensors share subscript(s).")
 
