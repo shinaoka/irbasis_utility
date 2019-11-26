@@ -62,7 +62,6 @@ class AutoALS:
         # Tensor network representation of <tilde_y | tilde_y>
         self._ctildey_tildey = conj_a_b(tilde_y, tilde_y)
 
-        # ALS fitting matrix
         self._num_tensors_opt = len(target_tensors)
         self._target_tensors = target_tensors
         self._ys = []
@@ -98,6 +97,6 @@ class AutoALS:
                N = len(vec_y)
                tensor_name = self._target_tensors[idx_t].name
                opA = self._opAs[idx_t](tensors_value)
-               # TODO: set appropriate tol
+               # TODO: set appropriate tol. lgmres is my random choice. Which one is the best?
                r = lgmres(opA, vec_y)
                tensors_value[tensor_name][:] = r[0].reshape(tensors_value[tensor_name].shape)

@@ -109,7 +109,6 @@ class TestMethods(unittest.TestCase):
         cv2 = c.evaluate({"a1" : a1v, "a2" : a2v, "b1" : b1v, "b2" : b2v})
         self.assertAlmostEqual(cv, cv2)
 
-    """
     def test_auto_als(self):
         numpy.random.seed(100)
 
@@ -131,7 +130,7 @@ class TestMethods(unittest.TestCase):
         values['b'] = numpy.random.randn(N4, N2)
 
         auto_als.fit(niter=1, tensors_value=values)
-    """
+        # TODO: Check if the result of fitting is correct.
 
     def test_auto_als_share_indices(self):
         numpy.random.seed(100)
@@ -152,6 +151,7 @@ class TestMethods(unittest.TestCase):
         values['x'] = numpy.random.randn(N3, N2)
 
         auto_als.fit(niter=1, tensors_value=values)
+        # TODO: Check if the result of fitting is correct.
 
 
 if __name__ == '__main__':

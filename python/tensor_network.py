@@ -326,9 +326,8 @@ def differenciate(tensor_network, tensors):
         Tensor network to be differentiated
     :param tensors: Tensor
         Tensors
-    :return:
-        A lambda function which returns a ndarray object for a given set of tensor values.
-        The indices of the ndarray objects are sorted in the order in which they appear in "tensors".
+    :return: TensorNetwork
+        Result of differentiation
     """
     if isinstance(tensors, Tensor):
         tensors = [tensors]
@@ -347,7 +346,4 @@ def differenciate(tensor_network, tensors):
             if t1 == t2:
                 raise RuntimeError("Unsupported: tensors must not contain multiple equivalent tensors.")
 
-    tensor_subscripts = [tensor_network.tensor_subscripts(t) for t in tensors]
-
-    d_tnw = tensor_network.remove(tensors)
-    return d_tnw
+    return tensor_network.remove(tensors)
