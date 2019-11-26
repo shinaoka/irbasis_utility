@@ -1,7 +1,26 @@
 from __future__ import print_function
 
 import numpy
-from .tensor_network import Tensor, TensorNetwork, conj_a_b, differenciate
+from .tensor_network import Tensor, TensorNetwork, conj_a_b, differenciate, from_int_to_char_subscripts, _unique_order_preserved
+from scipy.sparse.linalg import LinearOperator, lgmres
+
+def _create_linear_operator(op_array, op_subs, left_subs, right_subs, dims):
+    op_subs_str = ''.join(op_subs)
+    left_subs_str = ''.join(left_subs)
+    right_subs_str = ''.join(right_subs)
+
+    matvec_str = '{},{}->{}'.format(op_subs_str, right_subs_str, left_subs_str)
+    rmatvec_str = '{},{}->{}'.format(op_subs_str, left_subs_str, right_subs_str)
+
+    def matvec(v):
+        return numpy.einsum(matvec_str, op_array, v.reshape(dims), optimize=True)
+
+    def rmatvec(v):
+        return numpy.einsum(rmatvec_str, op_array, v.reshape(dims).conjugate(), optimize=True).conjugate()
+
+    N = numpy.prod(dims)
+    return LinearOperator((N, N), matvec=matvec, rmatvec=rmatvec)
+
 
 class AutoALS:
     """
@@ -22,8 +41,6 @@ class AutoALS:
         assert isinstance(tilde_y, TensorNetwork)
 
         if tilde_y.external_subscripts != y.external_subscripts:
-            ##print("AAA", tilde_y.external_subscripts)
-            #print("BBB", y.external_subscripts)
             raise RuntimeError("Subscripts for external indices of y and tilde_y do not match")
 
         # No tensor must be conjugate.
@@ -48,8 +65,22 @@ class AutoALS:
         # ALS fitting matrix
         self._num_tensors_opt = len(target_tensors)
         self._target_tensors = target_tensors
-        self._ys = [differenciate(self._ctildey_y, t.conjugate()) for t in target_tensors]
-        self._As = [differenciate(self._ctildey_tildey, [t.conjugate(), t]) for t in target_tensors]
+        self._ys = []
+        for t in target_tensors:
+            diff = differenciate(self._ctildey_y, t.conjugate())
+            diff.find_contraction_path()
+            self._ys.append(diff)
+
+        self._opAs = []
+        for t in target_tensors:
+            diff = differenciate(self._ctildey_tildey, [t.conjugate(), t])
+            diff.find_contraction_path()
+            tc_subs = self._ctildey_tildey.tensor_subscripts(t.conjugate())
+            t_subs = self._ctildey_tildey.tensor_subscripts(t)
+
+            A_subs = diff.external_subscripts
+            char_subs = from_int_to_char_subscripts([A_subs, tc_subs, t_subs])
+            self._opAs.append(lambda x: _create_linear_operator(diff.evaluate(x), *char_subs, t.shape))
 
     def fit(self, niter, tensors_value):
         """
@@ -63,9 +94,10 @@ class AutoALS:
 
         for iter in range(niter):
            for idx_t in range(self._num_tensors_opt):
-               print("iter", iter, idx_t)
-               mat_A = self._As[idx_t](tensors_value)
-               vec_y = self._ys[idx_t](tensors_value).ravel()
+               vec_y = self._ys[idx_t].evaluate(tensors_value).ravel()
                N = len(vec_y)
                tensor_name = self._target_tensors[idx_t].name
-               tensors_value[tensor_name][:] = numpy.linalg.solve(mat_A.reshape((N, N)), vec_y).reshape(tensors_value[tensor_name].shape)
+               opA = self._opAs[idx_t](tensors_value)
+               # TODO: set appropriate tol
+               r = lgmres(opA, vec_y)
+               tensors_value[tensor_name][:] = r[0].reshape(tensors_value[tensor_name].shape)

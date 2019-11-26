@@ -93,7 +93,8 @@ class TensorNetwork(object):
             if len(tensor.shape) != len(s):
                 raise RuntimeError("Dimension mismatch")
 
-        unique_subscripts = numpy.unique(sum(subscripts, ()))
+        #unique_subscripts = numpy.unique(sum(subscripts, ()))
+        unique_subscripts = _unique_order_preserved(sum(subscripts, ()))
 
         # Mark external subscript
         #  An external subscript appears only once.
@@ -114,7 +115,6 @@ class TensorNetwork(object):
         self._map_subscript_char = {}
         for idx, subscript in enumerate(self._unique_subscripts):
             self._map_subscript_char[subscript] = _to_alphabet(idx)
-        print("map", self._map_subscript_char)
 
         # Create str ver. of subscripts
         f = lambda x : self._map_subscript_char[x]
@@ -123,9 +123,31 @@ class TensorNetwork(object):
         right_str = ints_to_alphabets(self._external_subscripts)
         self._str_sub = left_str + '->' + right_str
 
+        # Shape
+        self._extern_subs_order = {s : i for i, s in enumerate(self._external_subscripts)}
+        shape = numpy.empty((len(self._external_subscripts),), dtype=int)
+        for tensor, sub in zip(self._tensors, self._subscripts):
+            for dim, s in zip(tensor.shape, sub):
+                if s in self._external_subscripts:
+                    shape[self._extern_subs_order[s]] = dim
+        self._shape = tuple(shape)
+
+    def __str__(self):
+        str1 =  ', '.join([t.__str__() for t in self._tensors])
+        str2 =  ', '.join([s.__str__() for s in self._subscripts])
+
+        return str1 + '\n' + str2
+
+    def __repr__(self):
+        return self.__str__()
+
     @property
     def tensors(self):
         return self._tensors
+
+    @property
+    def shape(self):
+        return self._shape
 
     @property
     def num_tensors(self):
@@ -150,13 +172,10 @@ class TensorNetwork(object):
         """
 
         dummy_arrays = [numpy.empty(t.shape) for t in self._tensors]
-        #print(self._str_sub)
-        #print(len(dummy_arrays))
         self._contraction_path, string_repr = numpy.einsum_path(self._str_sub, *dummy_arrays, optimize=('optimal', 1E+18))
 
         if verbose:
             print(string_repr)
-
 
     def evaluate(self, values_of_tensors):
         """
@@ -180,9 +199,7 @@ class TensorNetwork(object):
             else:
                 arrays.append(values_of_tensors[t.name])
 
-        print("str_sub", self._str_sub, self._tensors)
         r = numpy.einsum(self._str_sub, *arrays, optimize=self._contraction_path)
-        print("r shape", r.shape)
         return r
 
     def find_tensor(self, tensor):
@@ -292,6 +309,15 @@ def conj_a_b(a, b):
     return TensorNetwork(new_tensors, new_subscripts)
 
 
+def _unique_order_preserved(x):
+    u, ind = numpy.unique(numpy.asarray(x), return_index=True)
+    return u[numpy.argsort(ind)]
+
+def from_int_to_char_subscripts(subscripts):
+    unique_subscripts = _unique_order_preserved(sum([list(t) for t in subscripts], []))
+    mapping = {unique_subscripts[i] : _to_alphabet(i) for i in range(len(unique_subscripts))}
+    return [map(lambda x: mapping[x], s) for s in subscripts]
+
 def differenciate(tensor_network, tensors):
     """
     Differenciate a tensor network w.r.t tensor(s).
@@ -301,7 +327,8 @@ def differenciate(tensor_network, tensors):
     :param tensors: Tensor
         Tensors
     :return:
-        A Lambda function which returns a ndarray or a LinearOperator for a given set of tensor values.
+        A lambda function which returns a ndarray object for a given set of tensor values.
+        The indices of the ndarray objects are sorted in the order in which they appear in "tensors".
     """
     if isinstance(tensors, Tensor):
         tensors = [tensors]
@@ -322,14 +349,5 @@ def differenciate(tensor_network, tensors):
 
     tensor_subscripts = [tensor_network.tensor_subscripts(t) for t in tensors]
 
-    all_subscripts = sum([list(t) for t in tensor_subscripts], [])
-    if len(all_subscripts) == len(numpy.unique(all_subscripts)):
-        #If tensors share no subscript, the result of differentiation is a generator of matrix.
-        d_tnw = tensor_network.remove(tensors)
-        d_tnw.find_contraction_path()
-        transpose_axes = tuple([d_tnw.external_subscripts.index(s) for s in all_subscripts])
-        return lambda x : d_tnw.evaluate(x).transpose(transpose_axes)
-    else:
-        # This function should return a generator of scipy.sparse.linalg.LinearOperator.
-        raise RuntimeError("Unsupported: tensors share subscript(s).")
-
+    d_tnw = tensor_network.remove(tensors)
+    return d_tnw

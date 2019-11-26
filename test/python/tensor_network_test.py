@@ -32,6 +32,7 @@ class TestMethods(unittest.TestCase):
         tn = TensorNetwork([A, B], [(0,1),(1,2)])
 
         self.assertEqual(tn.find_tensor(B), 1)
+        self.assertEqual(tn.shape, (N1, N3))
 
         numpy.testing.assert_allclose(tn.external_subscripts, numpy.array([0,2]))
 
@@ -44,16 +45,39 @@ class TestMethods(unittest.TestCase):
         val_ref = numpy.einsum('ij,jk->ik', vals['A'], vals['B'].conjugate())
         numpy.testing.assert_allclose(val, val_ref)
 
-    def test_tensor_network_removal(self):
+    def test_tensor_network_order_external(self):
+        """
+        External indices are in the order in which those of the tensors appear
+        """
         N1, N2, N3 = 10, 20, 30
-        # A_{01} (B_{12})
         A = Tensor("A", (N1, N2))
         B = Tensor("B", (N2, N3))
-        tn = TensorNetwork([A, B], [(0,1),(1,2)])
+        tn = TensorNetwork([A, B], [(3, 1), (1, 2)])
+        self.assertEqual(tn.external_subscripts, (3, 2))
+
+    def test_tensor_network_removal(self):
+        N1, N2, N3, N4, N5 = 2, 4, 6, 8, 10
+        A = Tensor("A", (N1, N2))
+        B = Tensor("B", (N2, N3))
+        C = Tensor("C", (N3, N4))
+        D = Tensor("D", (N4, N5))
+        tn = TensorNetwork([A, B, C, D], [(0,1),(1,2),(2,3),(3,-1)])
         tn2 = tn.remove(B)
 
-        assert tn2.tensors == [A]
-        assert tn2.subscripts == [(0,1)]
+        assert tn2.tensors == [A, C, D]
+        assert tn2.subscripts == [(0,1),(2,3),(3,-1)]
+
+    def test_tensor_network_multi_removal(self):
+        N1, N2, N3, N4, N5 = 2, 4, 6, 8, 10
+        A = Tensor("A", (N1, N2))
+        B = Tensor("B", (N2, N3))
+        C = Tensor("C", (N3, N4))
+        D = Tensor("D", (N4, N5))
+        tn = TensorNetwork([A, B, C, D], [(0,1),(1,2),(2,3),(3,-1)])
+        tn2 = tn.remove([D, B])
+
+        assert tn2.tensors == [A, C]
+        assert tn2.subscripts == [(0,1),(2,3)]
 
     def test_conj_a_b(self):
         """
@@ -85,6 +109,7 @@ class TestMethods(unittest.TestCase):
         cv2 = c.evaluate({"a1" : a1v, "a2" : a2v, "b1" : b1v, "b2" : b2v})
         self.assertAlmostEqual(cv, cv2)
 
+    """
     def test_auto_als(self):
         numpy.random.seed(100)
 
@@ -105,9 +130,28 @@ class TestMethods(unittest.TestCase):
         values['x'] = numpy.random.randn(N3, N4)
         values['b'] = numpy.random.randn(N4, N2)
 
-        auto_als.fit(niter=100, tensors_value=values)
+        auto_als.fit(niter=1, tensors_value=values)
+    """
 
+    def test_auto_als_share_indices(self):
+        numpy.random.seed(100)
 
+        N1, N2, N3 = 30, 20, 10
+        y1 = Tensor("y1", (N1, N2))
+        y = TensorNetwork([y1], [(1,2)])
+
+        a = Tensor("a", (N1, N3))
+        x = Tensor("x", (N3, N2))
+        tilde_y = TensorNetwork([a, x], [(1,3),(3,2)])
+
+        auto_als = AutoALS(y, tilde_y, [x])
+
+        values = {}
+        values['y1'] = numpy.random.randn(N1, N2)
+        values['a'] = numpy.random.randn(N1, N3)
+        values['x'] = numpy.random.randn(N3, N2)
+
+        auto_als.fit(niter=1, tensors_value=values)
 
 
 if __name__ == '__main__':
