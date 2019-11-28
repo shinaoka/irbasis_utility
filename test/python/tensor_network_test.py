@@ -112,7 +112,7 @@ class TestMethods(unittest.TestCase):
     def test_auto_als(self):
         numpy.random.seed(100)
 
-        N1, N2, N3, N4 = 20, 20, 1, 2
+        N1, N2, N3, N4 = 2, 2, 4, 4
         y1 = Tensor("y1", (N1, N2))
         y = TensorNetwork([y1], [(0,1)])
 
@@ -129,13 +129,13 @@ class TestMethods(unittest.TestCase):
         values['x'] = numpy.random.randn(N3, N4)
         values['b'] = numpy.random.randn(N4, N2)
 
-        auto_als.fit(niter=1, tensors_value=values)
-        # TODO: Check if the result of fitting is correct.
+        auto_als.fit(niter=100, tensors_value=values)
+        self.assertLess(numpy.abs(auto_als.squared_error(values)), 1e-10)
 
     def test_auto_als_share_indices(self):
         numpy.random.seed(100)
 
-        N1, N2, N3 = 30, 20, 10
+        N1, N2, N3 = 3, 2, 10
         y1 = Tensor("y1", (N1, N2))
         y = TensorNetwork([y1], [(1,2)])
 
@@ -150,8 +150,8 @@ class TestMethods(unittest.TestCase):
         values['a'] = numpy.random.randn(N1, N3)
         values['x'] = numpy.random.randn(N3, N2)
 
-        auto_als.fit(niter=1, tensors_value=values)
-        # TODO: Check if the result of fitting is correct.
+        auto_als.fit(niter=100, tensors_value=values)
+        self.assertLess(numpy.abs(auto_als.squared_error(values)), 1e-10)
 
 
 if __name__ == '__main__':

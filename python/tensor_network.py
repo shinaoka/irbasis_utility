@@ -316,7 +316,7 @@ def _unique_order_preserved(x):
 def from_int_to_char_subscripts(subscripts):
     unique_subscripts = _unique_order_preserved(sum([list(t) for t in subscripts], []))
     mapping = {unique_subscripts[i] : _to_alphabet(i) for i in range(len(unique_subscripts))}
-    return [map(lambda x: mapping[x], s) for s in subscripts]
+    return [list(map(lambda x: mapping[x], s)) for s in subscripts]
 
 def differenciate(tensor_network, tensors):
     """

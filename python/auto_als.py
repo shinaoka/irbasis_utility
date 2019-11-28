@@ -5,6 +5,9 @@ from .tensor_network import Tensor, TensorNetwork, conj_a_b, differenciate, from
 from scipy.sparse.linalg import LinearOperator, lgmres
 
 def _create_linear_operator(op_array, op_subs, left_subs, right_subs, dims):
+    assert isinstance(op_subs, list)
+    assert isinstance(left_subs, list)
+    assert isinstance(right_subs, list)
     op_subs_str = ''.join(op_subs)
     left_subs_str = ''.join(left_subs)
     right_subs_str = ''.join(right_subs)
@@ -58,9 +61,16 @@ class AutoALS:
 
         # Tensor network representation of <tilde_y | y>
         self._ctildey_y = conj_a_b(tilde_y, y)
+        self._ctildey_y.find_contraction_path()
 
         # Tensor network representation of <tilde_y | tilde_y>
         self._ctildey_tildey = conj_a_b(tilde_y, tilde_y)
+        self._ctildey_tildey.find_contraction_path()
+
+        # Residual
+        # <tilde_y - y|tilde_y - y> = <tilde_y|tilde_y> - <tilde_y|y> - <y|tilde_y> + <y|y>
+        self._cy_y = conj_a_b(y, y)
+        self._cy_y.find_contraction_path()
 
         self._num_tensors_opt = len(target_tensors)
         self._target_tensors = target_tensors
@@ -81,13 +91,25 @@ class AutoALS:
             char_subs = from_int_to_char_subscripts([A_subs, tc_subs, t_subs])
             self._opAs.append(lambda x: _create_linear_operator(diff.evaluate(x), *char_subs, t.shape))
 
+    def squared_error(self, tensors_value):
+        """
+        Compute squared error
+
+        :param tensor_value: dict of (str, ndarray)
+           Values of tensors (input)
+        :return:
+           Squared error
+        """
+        return self._ctildey_tildey.evaluate(tensors_value) + self._cy_y.evaluate(tensors_value)  - 2 * self._ctildey_y.evaluate(tensors_value).real
+
+
     def fit(self, niter, tensors_value):
         """
         Perform ALS fitting
 
         :param niter: int
             Number of iterations
-        :param tensor_values: dict of (str, ndarray)
+        :param tensor_value: dict of (str, ndarray)
             Values of tensors. Those of target tensors will be updated.
         """
 
