@@ -110,6 +110,9 @@ class TestMethods(unittest.TestCase):
         self.assertAlmostEqual(cv, cv2)
 
     def test_auto_als(self):
+        """
+        Target tensors share no index.
+        """
         numpy.random.seed(100)
 
         N1, N2, N3, N4 = 2, 2, 4, 4
@@ -133,6 +136,9 @@ class TestMethods(unittest.TestCase):
         self.assertLess(numpy.abs(auto_als.squared_error(values)), 1e-10)
 
     def test_auto_als_share_indices(self):
+        """
+        Target tensors share indices.
+        """
         numpy.random.seed(100)
 
         N1, N2, N3 = 3, 2, 10
@@ -151,6 +157,32 @@ class TestMethods(unittest.TestCase):
         values['x'] = numpy.random.randn(N3, N2)
 
         auto_als.fit(niter=100, tensors_value=values)
+        self.assertLess(numpy.abs(auto_als.squared_error(values)), 1e-10)
+
+    def test_auto_als_multiple_target(self):
+        """
+        Optimize multiple tensors
+        """
+        numpy.random.seed(100)
+
+        N1, N2, N3, N4, N5 = 3, 2, 2, 10, 10
+        y1 = Tensor("y1", (N1, N2, N3))
+        y = TensorNetwork([y1], [(1,2,3)])
+
+        a = Tensor("a", (N1, N4))
+        x1 = Tensor("x1", (N4, N5))
+        x2 = Tensor("x2", (N5, N2, N3))
+        tilde_y = TensorNetwork([a, x1, x2], [(1,-1),(-1,-2),(-2,2,3)])
+
+        auto_als = AutoALS(y, tilde_y, [x1, x2])
+
+        values = {}
+        values['y1'] = numpy.random.randn(N1, N2, N3)
+        values['a'] = numpy.random.randn(N1, N4)
+        values['x1'] = numpy.random.randn(N4, N5)
+        values['x2'] = numpy.random.randn(N5, N2, N3)
+
+        auto_als.fit(niter=1, tensors_value=values)
         self.assertLess(numpy.abs(auto_als.squared_error(values)), 1e-10)
 
 
