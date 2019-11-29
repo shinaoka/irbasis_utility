@@ -16,22 +16,23 @@ class TestMethods(unittest.TestCase):
         """
         Target tensors share no index.
         """
-        numpy.random.seed(100)
 
         comm = MPI.COMM_WORLD
 
         nproc = comm.Get_size()
+        rank = comm.Get_rank()
 
-        N1, N2 = 3, 5
+        numpy.random.seed(100 * rank + 100)
+
+        N1, N2 = 3, 10
         y1 = Tensor("y1", (N1,))
         y = TensorNetwork([y1], [(1,)])
 
-        """
         a = Tensor("a", (N1, N2))
         x = Tensor("x", (N2,))
         tilde_y = TensorNetwork([a, x], [(1,2),(2,)])
 
-        auto_als = AutoALS(y, tilde_y, [x], comm=comm)
+        auto_als = AutoALS(y, tilde_y, [x], comm=comm, distributed_subscript=1)
 
         values = {}
         if comm.Get_rank() == 0:
@@ -47,12 +48,8 @@ class TestMethods(unittest.TestCase):
         values['a'] = comm.scatter(a_all, root=0)
         values['x'] = comm.bcast(values['x'], root=0)
 
-        print("a", comm.Get_rank(), values['a'])
-        print("x", comm.Get_rank(), values['x'])
-
         auto_als.fit(niter=100, tensors_value=values)
         self.assertLess(numpy.abs(auto_als.squared_error(values)), 1e-10)
-        """
 
 if __name__ == '__main__':
     unittest.main()
