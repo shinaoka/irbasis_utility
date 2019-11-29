@@ -3,6 +3,12 @@ function(add_python_test test)
     set_tests_properties(python_${test} PROPERTIES ENVIRONMENT "PYTHONPATH=${CMAKE_BINARY_DIR}/test/python")
 endfunction(add_python_test)
 
+function(add_python_mpi_test test)
+    # Run tests with two MPI processes
+    add_test(NAME python_${test} COMMAND ${MPIRUN} ${MPIRUN_NUMPROC_FLAG} 2 ${PYTHON_EXECUTABLE} ${test}.py)
+    set_tests_properties(python_${test} PROPERTIES ENVIRONMENT "PYTHONPATH=${CMAKE_BINARY_DIR}/test/python")
+endfunction(add_python_mpi_test)
+
 find_package(PythonInterp REQUIRED)
 
 # Copy all library files
@@ -17,7 +23,16 @@ foreach(testfile ${TEST_FILES})
     configure_file(${testfile} ${CMAKE_BINARY_DIR}/test/python COPYONLY)
 endforeach()
 
+# Non-MPI tests
 set(python_test_src internal_test two_point_basis_test three_point_test four_point_test four_point_ph_view_test sampling_test regression_test tensor_network_test)
 foreach(test ${python_test_src})
     add_python_test(${test})
 endforeach(test)
+
+# MPI tests
+if (MPI_TEST)
+    set(python_mpi_test_src tensor_network_mpi_test)
+    foreach(test ${python_mpi_test_src})
+        add_python_mpi_test(${test})
+    endforeach(test)
+endif()

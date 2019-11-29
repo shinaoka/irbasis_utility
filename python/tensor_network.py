@@ -27,6 +27,9 @@ class Tensor(object):
             Complex conjugate
         """
 
+        if not isinstance(shape, tuple):
+            raise RuntimeError("shape must be a tuple of integers!")
+
         self._name = name
         self._shape = shape
         self._is_conj = is_conj

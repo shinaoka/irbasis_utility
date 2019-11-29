@@ -1,7 +1,7 @@
 from __future__ import print_function
 
 import numpy
-from .tensor_network import Tensor, TensorNetwork, conj_a_b, differenciate, from_int_to_char_subscripts, _unique_order_preserved
+from .tensor_network import Tensor, TensorNetwork, conj_a_b, differenciate, from_int_to_char_subscripts
 from scipy.sparse.linalg import LinearOperator, lgmres
 
 class LSSolver(object):
@@ -50,7 +50,7 @@ class AutoALS:
     """
     Automated alternating least squares fitting of tensor network
     """
-    def __init__(self, y, tilde_y, target_tensors, verbose=False):
+    def __init__(self, y, tilde_y, target_tensors, verbose=False, comm=None):
         """
 
         :param y: TensorNetwork
@@ -59,6 +59,11 @@ class AutoALS:
             Tensor network for fitting y
         :param target_tensors: list of Tensor
             Name of tensors in tilde_y to be optimized
+        :param comm:
+            MPI communicator.
+            If comm is not None, MPI is enabled and "tensor y" is the sum of contributions on multiple MPI processes.
+            tensor tildey must be the same on all processes.
+
         """
 
         assert isinstance(y, TensorNetwork)
@@ -100,6 +105,8 @@ class AutoALS:
         for t in target_tensors:
             self._solvers.append(LSSolver(t, self._ctildey_y, self._ctildey_tildey))
 
+        self._comm = comm
+
 
     def squared_error(self, tensors_value):
         """
@@ -110,7 +117,11 @@ class AutoALS:
         :return:
            Squared error
         """
-        return self._ctildey_tildey.evaluate(tensors_value) + self._cy_y.evaluate(tensors_value)  - 2 * self._ctildey_y.evaluate(tensors_value).real
+
+        if self._comm is None:
+            return self._ctildey_tildey.evaluate(tensors_value) + self._cy_y.evaluate(tensors_value)  - 2 * self._ctildey_y.evaluate(tensors_value).real
+        else:
+            raise RuntimeError("Computing squared_error is not implemented when MPI enabled.")
 
 
     def fit(self, niter, tensors_value):
