@@ -55,7 +55,6 @@ class LeastSquaresOpGenerator(object):
         right_subs_str = ''.join(right_subs)
 
         self._matvec_str = '{},{}->{}'.format(op_subs_str, right_subs_str, left_subs_str)
-        self._rmatvec_str = '{},{}->{}'.format(op_subs_str, left_subs_str, right_subs_str)
         self._dims = target_tensor.shape
 
         self._comm = comm
@@ -85,7 +84,6 @@ class LeastSquaresOpGenerator(object):
             sizes, offsets = _mpi_split(N, self._comm.Get_size())
             start, end = offsets[rank], offsets[rank] + sizes[rank]
             A = op_array.reshape((N, N))[start:end, :]
-            conjA = (op_array.reshape((N, N))[:, start:end]).conjugate().transpose()
             if numpy.amin(sizes) == 0:
                 raise RuntimeError("sizes contains 0!")
 
@@ -94,30 +92,21 @@ class LeastSquaresOpGenerator(object):
                 self._comm.Allgatherv(numpy.dot(A,v).ravel(), [recv, sizes, offsets, mpi_type])
                 return recv
 
-            def rmatvec(v):
-                recv = numpy.empty(N, dtype=A.dtype)
-                self._comm.Allgatherv(numpy.dot(conjA,v).ravel(), [recv, sizes, offsets, mpi_type])
-                return recv
-
-            return LinearOperator((N, N), matvec=matvec, rmatvec=rmatvec)
+            return LinearOperator((N, N), matvec=matvec)
         else:
             matvec = lambda v: numpy.einsum(self._matvec_str, op_array, v.reshape(self._dims), optimize=True).ravel()
-            rmatvec = lambda v : numpy.einsum(self._rmatvec_str, op_array, v.reshape(self._dims).conjugate(), optimize=True).conjugate().ravel()
-            return LinearOperator((N, N), matvec=matvec, rmatvec=rmatvec)
+            return LinearOperator((N, N), matvec=matvec)
 
 
 def _sum_ops_flipped_sign(ops):
     # Compute sum of linear operators of the same shape and flip the sign
     matvec = lambda v: -sum([coeff * o.matvec(v) for coeff, o in ops])
-    rmatvec = lambda v: -sum([numpy.conj(coeff) * o.rmatvec(v) for coeff, o in ops])
     N1, N2 = ops[0][1].shape
-    return LinearOperator((N1, N2), matvec=matvec, rmatvec=rmatvec)
+    return LinearOperator((N1, N2), matvec=matvec)
 
 def _identity_operator(N):
     matvec = lambda v: v
-    rmatvec = lambda v: v
-    return LinearOperator((N, N), matvec=matvec, rmatvec=rmatvec)
-
+    return LinearOperator((N, N), matvec=matvec)
 
 class LinearOperatorGenerator(object):
     """
@@ -290,11 +279,12 @@ class AutoALS:
             Values of tensors. Those of target tensors will be updated.
         """
 
+        #TODO: Nesterov's acceleration, atol, rtol
         for iter in range(niter):
             for target_tensor in self._target_tensors:
                 name = target_tensor.name
                 opA = self._A_generators[name].construct(tensors_value)
                 vec_y = self._y_generators[name].construct(tensors_value)
-                # Note: A is a hermitian.
+                # Note: A is a hermitian and semi positive definite.
                 r = cg(opA, vec_y)
                 tensors_value[name][:] = r[0].reshape(tensors_value[name].shape)
