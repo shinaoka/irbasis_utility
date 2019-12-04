@@ -185,6 +185,63 @@ class TestMethods(unittest.TestCase):
         auto_als.fit(niter=1, tensors_value=values)
         self.assertLess(numpy.abs(auto_als.squared_error(values)), 1e-10)
 
+    def test_auto_als_multi_tensor_networks(self):
+        """
+        Fit multiple tensor networks by multiple tensor networks
+        """
+        numpy.random.seed(100)
+
+        N1, N2, N3 = 3, 2, 10
+        y1 = TensorNetwork([Tensor("y1", (N1, N2))], [(1,2)])
+        y2 = TensorNetwork([Tensor("y2", (N1, N2))], [(1,2)])
+        Y = [y1, y2]
+
+        x = Tensor("x", (N3, N2))
+        tilde_y1 = TensorNetwork([Tensor("a1", (N1, N3)), x], [(1,3),(3,2)])
+        tilde_y2 = TensorNetwork([Tensor("a2", (N1, N3)), x], [(1,3),(3,2)])
+        tilde_Y = [tilde_y1, tilde_y2]
+
+        auto_als = AutoALS(Y, tilde_Y, [x])
+
+        values = {}
+        values['y1'] = numpy.random.randn(N1, N2)
+        values['y2'] = numpy.random.randn(N1, N2)
+        values['a1'] = numpy.random.randn(N1, N3)
+        values['a2'] = numpy.random.randn(N1, N3)
+        values['x'] = numpy.random.randn(N3, N2)
+
+        auto_als.fit(niter=100, tensors_value=values)
+        self.assertLess(numpy.abs(auto_als.squared_error(values)), 1e-10)
+
+    def test_auto_als_regularization(self):
+        """
+        Ridge regression
+        x^* = argmin_x  |y-a*x|^2 + lambda * |x|^2
+        x^* = a * y/(lambda + a^2)
+        """
+        numpy.random.seed(100)
+
+        N = 1
+        y1 = Tensor("y1", (N,))
+        y = TensorNetwork([y1], [(1,)])
+
+        a = Tensor("a", (N, N))
+        x = Tensor("x", (N,))
+        tilde_y = TensorNetwork([a, x], [(1,2),(2,)])
+
+        reg_L2 = 0.1
+        auto_als = AutoALS(y, tilde_y, [x], reg_L2=reg_L2)
+
+        values = {}
+        values['y1'] = numpy.array([1.0])
+        values['a'] = numpy.array([[1.0]])
+        values['x'] = numpy.random.randn(N, N)
+
+        auto_als.fit(niter=100, tensors_value=values)
+
+        opt_x = values['x'][0,0]
+        self.assertAlmostEqual(opt_x, 1/(reg_L2 + 1))
+
 
 if __name__ == '__main__':
     unittest.main()

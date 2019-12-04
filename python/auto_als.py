@@ -16,11 +16,30 @@ def _mpi_split(work_size, comm_size):
 
     return sizes, offsets
 
+def _is_list_of_instance(object, classinfo):
+    """
+    Return True if the object is a list of instances of the classinfo argument.
+    """
+    return isinstance(object, list) and numpy.all([isinstance(o, classinfo) for o in object])
+
 class LeastSquaresOpGenerator(object):
     """
     Coefficient matrix of a least squares problem
     """
     def __init__(self, target_tensor, term, comm, distributed, parallel_solver):
+        """
+
+        :param target_tensor: Tensor
+            "term" is differentiated by "target_tensor".
+        :param term: TensorNetwork
+             The tensor network to be differentiated.
+        :param comm:
+             MPI communicator
+        :param distributed: bool
+             If True, the linear operator is summed over all MPI nodes.
+        :param parallel_solver:
+             If True, the linear operator uses MPI parallelization
+        """
         assert not target_tensor.is_conj
         # Tensor network for A
         self._A_tn = differenciate(term, [target_tensor.conjugate(), target_tensor])
@@ -45,12 +64,18 @@ class LeastSquaresOpGenerator(object):
 
         self._op_is_matrix = (left_subs + right_subs == op_subs)
 
+        self._size = numpy.prod(self._dims)
+
+    @property
+    def size(self):
+        return self._size
+
     def construct(self, tensors_value):
         op_array = self._A_tn.evaluate(tensors_value)
         if self._distributed:
             op_array[:] = self._comm.allreduce(op_array)
 
-        N = numpy.prod(self._dims)
+        N = self._size
         if self._parallel_solver and self._op_is_matrix:
             from mpi4py import MPI
 
@@ -88,21 +113,31 @@ def _sum_ops_flipped_sign(ops):
     N1, N2 = ops[0][1].shape
     return LinearOperator((N1, N2), matvec=matvec, rmatvec=rmatvec)
 
+def _identity_operator(N):
+    matvec = lambda v: v
+    rmatvec = lambda v: v
+    return LinearOperator((N, N), matvec=matvec, rmatvec=rmatvec)
+
 
 class LinearOperatorGenerator(object):
     """
     Differentiate sum of terms representing scalar tensors and construct a generator of LinearOperator
     """
-    def __init__(self, target_tensor, terms, comm, distributed, parallel_solver):
+    def __init__(self, target_tensor, terms, comm, distributed, parallel_solver, reg_L2):
         self._generators = []
         for coeff, term in terms:
             if term.has(target_tensor) and term.has(target_tensor.conjugate()):
                 genA = LeastSquaresOpGenerator(target_tensor, term, comm, distributed, parallel_solver)
                 self._generators.append((coeff, genA))
+        self._reg_L2 = reg_L2
 
     def construct(self, tensors_value):
         # Note sign is flipped
-        return _sum_ops_flipped_sign([(coeff, genA.construct(tensors_value)) for coeff, genA in self._generators])
+        ops = [(coeff, genA.construct(tensors_value)) for coeff, genA in self._generators]
+        if self._reg_L2 != 0:
+            N = self._generators[0][1].size
+            ops.append((self._reg_L2, _identity_operator(N)))
+        return _sum_ops_flipped_sign(ops)
 
 
 class VectorGenerator(object):
@@ -135,15 +170,17 @@ class AutoALS:
     """
     Automated alternating least squares fitting of tensor network
     """
-    def __init__(self, y, tilde_y, target_tensors, verbose=False, comm=None, distributed_subscript=None):
+    def __init__(self, Y, tilde_Y, target_tensors, reg_L2=0.0, comm=None, distributed_subscript=None):
         """
 
-        :param y: TensorNetwork
-            Tensor network to be fitted (constant during optimization)
-        :param tilde_y: TensorNetwork
-            Tensor network for fitting y
-        :param target_tensors: list of Tensor
+        :param Y: a list of TensorNetwork
+            Tensor networks to be fitted (constant during optimization)
+        :param tilde_Y: a list of TensorNetwork
+            Fitting tensor networks
+        :param target_tensors: a list of Tensor
             Name of tensors in tilde_y to be optimized
+        :param reg_L2: float
+            L2 regularization parameter
         :param comm:
             MPI communicator.
             If comm is not None, MPI is enabled.
@@ -153,41 +190,50 @@ class AutoALS:
             That index can have different sizes on different processes.
         """
 
-        assert isinstance(y, TensorNetwork)
-        assert isinstance(tilde_y, TensorNetwork)
+        if isinstance(Y, TensorNetwork):
+            Y = [Y]
+        if isinstance(tilde_Y, TensorNetwork):
+            tilde_Y = [tilde_Y]
 
-        if tilde_y.external_subscripts != y.external_subscripts:
-            raise RuntimeError("Subscripts for external indices of y and tilde_y do not match")
+        assert _is_list_of_instance(Y, TensorNetwork)
+        assert _is_list_of_instance(tilde_Y, TensorNetwork)
+
+        if len(set([y.external_subscripts for y in Y + tilde_Y])) > 1:
+            raise RuntimeError("Subscripts for external indices are not identical.")
 
         # No tensor must be conjugate.
-        if numpy.any([t.is_conj for t in y.tensors]):
-            raise RuntimeError("Some tensor in y is conjugate.")
-        if numpy.any([t.is_conj for t in tilde_y.tensors]):
-            raise RuntimeError("Some tensor in tilde_y is conjugate.")
+        for y in Y:
+            if numpy.any([t.is_conj for t in y.tensors]):
+                raise RuntimeError("Some tensor in Y is conjugate.")
+            if numpy.count_nonzero([t in target_tensors for t in y.tensors]) > 0:
+                raise RuntimeError("y must not contain a target tensor.")
+        for tilde_y in tilde_Y:
+            if numpy.any([t.is_conj for t in tilde_y.tensors]):
+                raise RuntimeError("Some tensor in tilde_Y is conjugate.")
+            if numpy.count_nonzero([t in target_tensors for t in tilde_y.tensors]) == 0:
+                raise RuntimeError("tilde_y contains no target tensor.")
+
         if numpy.any([t.is_conj for t in target_tensors]):
             raise RuntimeError("No target tensor can be conjugate.")
 
-        if numpy.count_nonzero([t in target_tensors for t in y.tensors]) > 0:
-            raise RuntimeError("y must not contain a target tensor.")
-        if numpy.count_nonzero([t in target_tensors for t in tilde_y.tensors]) == 0:
-            raise RuntimeError("tilde_y contains no target tensor.")
-
         self._comm = comm
+        self._distributed = not distributed_subscript is None
 
         # Check shape
+        """
         if not distributed_subscript is None:
-            self._distributed = True
             if self._comm is None:
                 raise RuntimeError("Enable MPI!")
             # Check all dimensions but distributed subscript
             if not distributed_subscript in y.external_subscripts:
                 raise RuntimeError("Set correct distributed_subscript!")
-            idx = y.external_subscripts.index(distributed_subscript)
+            idx = Y[0].external_subscripts.index(distributed_subscript)
             shapes = self._comm.allgather(numpy.delete(numpy.array(y.shape), idx))
             if not numpy.all(shapes[0] == shapes):
                 raise RuntimeError("Shape mismatch of y tensor on different nodes!")
         else:
             self._distributed = False
+        """
 
         def dot_product(a, b):
             ab = conj_a_b(a[1], b[1])
@@ -199,7 +245,7 @@ class AutoALS:
         self._diagonal_terms = []
         self._half_offdiag_terms = []
 
-        ket_tensors = [(1,tilde_y), (-1,y)]
+        ket_tensors = [(1,tilde_y) for tilde_y in tilde_Y] + [(-1,y) for y in Y]
         for i, lt in enumerate(ket_tensors):
             for j, rt in enumerate(ket_tensors):
                 dp = dot_product(lt, rt)
@@ -212,10 +258,9 @@ class AutoALS:
         self._A_generators = {}
         self._y_generators = {}
         for t in target_tensors:
-            self._A_generators[t.name] = LinearOperatorGenerator(t, all_terms, comm, self._distributed, not self._comm is None)
+            self._A_generators[t.name] = LinearOperatorGenerator(t, all_terms, comm, self._distributed, not self._comm is None, reg_L2)
             self._y_generators[t.name] = VectorGenerator(t, all_terms, comm, self._distributed)
 
-        self._num_tensors_opt = len(target_tensors)
         self._target_tensors = target_tensors
 
 
@@ -229,7 +274,7 @@ class AutoALS:
            Squared error
         """
 
-        local_se = _eval_terms(self._diagonal_terms, tensors_value) + 2 * numpy.real(_eval_terms(self._half_offdiag_terms, tensors_value))
+        local_se = numpy.real(_eval_terms(self._diagonal_terms, tensors_value)) + 2 * numpy.real(_eval_terms(self._half_offdiag_terms, tensors_value))
         if self._comm is None:
             return local_se
         else:

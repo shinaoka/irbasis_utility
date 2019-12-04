@@ -199,7 +199,7 @@ class TensorNetwork(object):
         arrays = []
         for t in self.tensors:
             if t.shape != values_of_tensors[t.name].shape:
-                raise RuntimeError("Dimension mismatch between tensors and values_of_tensors!")
+                raise RuntimeError("Dimension mismatch between tensors and values_of_tensors!: name={}".format(t.shape))
             if t.is_conj:
                 arrays.append(values_of_tensors[t.name].conjugate())
             else:
@@ -275,13 +275,14 @@ def conj_a_b(a, b):
     new_subscripts_a = {}
     new_subscripts_b = {}
 
-    # External indices
+    # External indices of a
     next_new_subscript = 0
     for subscript in a.unique_subscripts:
         if subscript in a.external_subscripts:
             new_subscripts_a[subscript] = next_new_subscript
             next_new_subscript += 1
 
+    # External indices of b
     next_new_subscript = 0
     for subscript in b.unique_subscripts:
         if subscript in b.external_subscripts:
