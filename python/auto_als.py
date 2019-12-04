@@ -1,8 +1,8 @@
 from __future__ import print_function
 
 import numpy
-from .tensor_network import Tensor, TensorNetwork, conj_a_b, differenciate, from_int_to_char_subscripts
-from scipy.sparse.linalg import LinearOperator, lgmres
+from .tensor_network import TensorNetwork, conj_a_b, differenciate, from_int_to_char_subscripts
+from scipy.sparse.linalg import LinearOperator, cg
 
 def _mpi_split(work_size, comm_size):
     base = work_size // comm_size
@@ -16,20 +16,17 @@ def _mpi_split(work_size, comm_size):
 
     return sizes, offsets
 
-class LSSolver(object):
+class LeastSquaresOpGenerator(object):
     """
-    Solve linear system for one tensor
+    Coefficient matrix of a least squares problem
     """
-    def __init__(self, target_tensor, ctildey_y, ctildey_tildey, comm, distributed, parallel_solver):
-        # Tensor network for y
-        self._y_tn = differenciate(ctildey_y, target_tensor.conjugate())
-        self._y_tn.find_contraction_path()
-
+    def __init__(self, target_tensor, term, comm, distributed, parallel_solver):
+        assert not target_tensor.is_conj
         # Tensor network for A
-        self._A_tn = differenciate(ctildey_tildey, [target_tensor.conjugate(), target_tensor])
+        self._A_tn = differenciate(term, [target_tensor.conjugate(), target_tensor])
         self._A_tn.find_contraction_path()
-        tc_subs = ctildey_tildey.tensor_subscripts(target_tensor.conjugate())
-        t_subs = ctildey_tildey.tensor_subscripts(target_tensor)
+        tc_subs = term.tensor_subscripts(target_tensor.conjugate())
+        t_subs = term.tensor_subscripts(target_tensor)
 
         A_subs = self._A_tn.external_subscripts
         op_subs, left_subs, right_subs = from_int_to_char_subscripts([A_subs, tc_subs, t_subs])
@@ -48,12 +45,10 @@ class LSSolver(object):
 
         self._op_is_matrix = (left_subs + right_subs == op_subs)
 
-    def solve(self, tensors_value):
+    def construct(self, tensors_value):
         op_array = self._A_tn.evaluate(tensors_value)
-        vec_y = self._y_tn.evaluate(tensors_value).ravel()
         if self._distributed:
             op_array[:] = self._comm.allreduce(op_array)
-            vec_y[:] = self._comm.allreduce(vec_y)
 
         N = numpy.prod(self._dims)
         if self._parallel_solver and self._op_is_matrix:
@@ -79,15 +74,61 @@ class LSSolver(object):
                 self._comm.Allgatherv(numpy.dot(conjA,v).ravel(), [recv, sizes, offsets, mpi_type])
                 return recv
 
-            opA = LinearOperator((N, N), matvec=matvec, rmatvec=rmatvec)
-            r = lgmres(opA, vec_y)
-            return r[0].reshape(self._dims)
+            return LinearOperator((N, N), matvec=matvec, rmatvec=rmatvec)
         else:
-            matvec = lambda v: numpy.einsum(self._matvec_str, op_array, v.reshape(self._dims), optimize=True)
-            rmatvec = lambda v : numpy.einsum(self._rmatvec_str, op_array, v.reshape(self._dims).conjugate(), optimize=True).conjugate()
-            opA = LinearOperator((N, N), matvec=matvec, rmatvec=rmatvec)
-            r = lgmres(opA, vec_y)
-            return r[0].reshape(self._dims)
+            matvec = lambda v: numpy.einsum(self._matvec_str, op_array, v.reshape(self._dims), optimize=True).ravel()
+            rmatvec = lambda v : numpy.einsum(self._rmatvec_str, op_array, v.reshape(self._dims).conjugate(), optimize=True).conjugate().ravel()
+            return LinearOperator((N, N), matvec=matvec, rmatvec=rmatvec)
+
+
+def _sum_ops_flipped_sign(ops):
+    # Compute sum of linear operators of the same shape and flip the sign
+    matvec = lambda v: -sum([coeff * o.matvec(v) for coeff, o in ops])
+    rmatvec = lambda v: -sum([numpy.conj(coeff) * o.rmatvec(v) for coeff, o in ops])
+    N1, N2 = ops[0][1].shape
+    return LinearOperator((N1, N2), matvec=matvec, rmatvec=rmatvec)
+
+
+class LinearOperatorGenerator(object):
+    """
+    Differentiate sum of terms representing scalar tensors and construct a generator of LinearOperator
+    """
+    def __init__(self, target_tensor, terms, comm, distributed, parallel_solver):
+        self._generators = []
+        for coeff, term in terms:
+            if term.has(target_tensor) and term.has(target_tensor.conjugate()):
+                genA = LeastSquaresOpGenerator(target_tensor, term, comm, distributed, parallel_solver)
+                self._generators.append((coeff, genA))
+
+    def construct(self, tensors_value):
+        # Note sign is flipped
+        return _sum_ops_flipped_sign([(coeff, genA.construct(tensors_value)) for coeff, genA in self._generators])
+
+
+class VectorGenerator(object):
+    """
+    Differentiate sum of terms representing scalar tensors and construct a generator of vector to be fitted
+    """
+    def __init__(self, target_tensor, terms, comm, distributed):
+        self._y_tn = []
+        for coeff, term in terms:
+            if (not term.has(target_tensor)) and term.has(target_tensor.conjugate()):
+                diff = differenciate(term, target_tensor.conjugate())
+                diff.find_contraction_path()
+                self._y_tn.append((coeff, diff))
+        self._comm = comm
+        self._distributed = distributed
+
+    def construct(self, tensors_value):
+        # Evaluate vector to be fitted
+        vec_y = sum([coeff * t.evaluate(tensors_value) for coeff, t in self._y_tn]).ravel()
+        if self._distributed:
+            vec_y[:] = self._comm.allreduce(vec_y)
+        return vec_y
+
+
+def _eval_terms(terms, tensors_value):
+    return numpy.sum([coeff * t.evaluate(tensors_value) for coeff, t in terms])
 
 
 class AutoALS:
@@ -106,10 +147,10 @@ class AutoALS:
         :param comm:
             MPI communicator.
             If comm is not None, MPI is enabled.
-            If MPI is enabled, ONE of the external indices of y and tilde_y is distributed on different processes.
-            That index can have different sizes on different processes.
         :param distributed_subscript: Integer
             Subscript of the distributed index
+            If this is not None, ONE of the external indices of y and tilde_y is distributed on different MPI nodes.
+            That index can have different sizes on different processes.
         """
 
         assert isinstance(y, TensorNetwork)
@@ -148,26 +189,34 @@ class AutoALS:
         else:
             self._distributed = False
 
-        # Tensor network representation of <tilde_y | y>
-        self._ctildey_y = conj_a_b(tilde_y, y)
-        self._ctildey_y.find_contraction_path()
+        def dot_product(a, b):
+            ab = conj_a_b(a[1], b[1])
+            ab.find_contraction_path()
+            return (numpy.conj(a[0])*b[0], ab)
 
-        # Tensor network representation of <tilde_y | tilde_y>
-        self._ctildey_tildey = conj_a_b(tilde_y, tilde_y)
-        self._ctildey_tildey.find_contraction_path()
+        # Tensor networks representing squared errors
+        all_terms = []
+        self._diagonal_terms = []
+        self._half_offdiag_terms = []
 
-        # Residual
-        # <tilde_y - y|tilde_y - y> = <tilde_y|tilde_y> - <tilde_y|y> - <y|tilde_y> + <y|y>
-        self._cy_y = conj_a_b(y, y)
-        self._cy_y.find_contraction_path()
+        ket_tensors = [(1,tilde_y), (-1,y)]
+        for i, lt in enumerate(ket_tensors):
+            for j, rt in enumerate(ket_tensors):
+                dp = dot_product(lt, rt)
+                if i < j:
+                    self._half_offdiag_terms.append(dp)
+                elif i==j:
+                    self._diagonal_terms.append(dp)
+                all_terms.append(dp)
+
+        self._A_generators = {}
+        self._y_generators = {}
+        for t in target_tensors:
+            self._A_generators[t.name] = LinearOperatorGenerator(t, all_terms, comm, self._distributed, not self._comm is None)
+            self._y_generators[t.name] = VectorGenerator(t, all_terms, comm, self._distributed)
 
         self._num_tensors_opt = len(target_tensors)
         self._target_tensors = target_tensors
-
-        self._solvers = []
-        for t in target_tensors:
-            self._solvers.append(LSSolver(t, self._ctildey_y, self._ctildey_tildey, self._comm, self._distributed, not self._comm is None))
-            #self._solvers.append(LSSolver(t, self._ctildey_y, self._ctildey_tildey, self._comm, self._distributed, False))
 
 
     def squared_error(self, tensors_value):
@@ -180,10 +229,11 @@ class AutoALS:
            Squared error
         """
 
+        local_se = _eval_terms(self._diagonal_terms, tensors_value) + 2 * numpy.real(_eval_terms(self._half_offdiag_terms, tensors_value))
         if self._comm is None:
-            return self._ctildey_tildey.evaluate(tensors_value) + self._cy_y.evaluate(tensors_value)  - 2 * self._ctildey_y.evaluate(tensors_value).real
+            return local_se
         else:
-            return self._comm.allreduce(self._ctildey_tildey.evaluate(tensors_value) + self._cy_y.evaluate(tensors_value)  - 2 * self._ctildey_y.evaluate(tensors_value).real)
+            return self._comm.allreduce(local_se)
 
     def fit(self, niter, tensors_value):
         """
@@ -196,6 +246,10 @@ class AutoALS:
         """
 
         for iter in range(niter):
-            for idx_t in range(self._num_tensors_opt):
-                tensor_name = self._target_tensors[idx_t].name
-                tensors_value[tensor_name][:] = self._solvers[idx_t].solve(tensors_value)
+            for target_tensor in self._target_tensors:
+                name = target_tensor.name
+                opA = self._A_generators[name].construct(tensors_value)
+                vec_y = self._y_generators[name].construct(tensors_value)
+                # Note: A is a hermitian.
+                r = cg(opA, vec_y)
+                tensors_value[name][:] = r[0].reshape(tensors_value[name].shape)

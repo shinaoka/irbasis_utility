@@ -180,6 +180,9 @@ class TensorNetwork(object):
         if verbose:
             print(string_repr)
 
+    def has(self, tensor):
+        return tensor in self._tensors
+
     def evaluate(self, values_of_tensors):
         """
         Evaluate the tensor network
