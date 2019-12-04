@@ -288,7 +288,7 @@ class AutoALS:
         norm2 = numpy.sum([numpy.linalg.norm(tensors_value[name])**2 for name in self._target_tensor_names])
         return se + self._reg_L2 * norm2
 
-    def _als_sweep(self, params, constants):
+    def _one_sweep(self, params, constants):
         # One sweep of ALS
         # Shallow copy
         params_new = deepcopy(params)
@@ -303,7 +303,7 @@ class AutoALS:
         return params_new
 
 
-    def fit(self, niter, tensors_value, rtol=1e-8, nesterov=True):
+    def fit(self, niter, tensors_value, rtol=1e-8, nesterov=True, verbose=False):
         """
         Perform ALS fitting
 
@@ -322,15 +322,13 @@ class AutoALS:
         target_tensor_names = set([t.name for t in self._target_tensors])
 
         # Deep copy
-        params = {k: v.copy() for k, v in tensors_value.items() if k in target_tensor_names}
+        x0 = {k: v.copy() for k, v in tensors_value.items() if k in target_tensor_names}
 
         # Shallow copy
         constants = {k: v for k, v in tensors_value.items() if not k in target_tensor_names}
 
         x_hist = []
         loss_hist = []
-
-        full = lambda x: ChainMap(x, constants)
 
         # Record history
         def append_x(x):
@@ -339,19 +337,16 @@ class AutoALS:
                 del x_hist[:-2]
                 del loss_hist[:-2]
             x_hist.append(x)
-            loss_hist.append(self.cost(full(x)))
+            loss_hist.append(self.cost(ChainMap(x, constants)))
 
-        x0 = params
         append_x(x0)
-        append_x(self._als_sweep(x0, constants))
+        append_x(self._one_sweep(x0, constants))
 
-        #TODO: atol, rtol
         beta = 1.0
         for iter in range(niter):
-            if rank==0:
+            if rank==0 and verbose:
                 print('iter= {} loss= {}'.format(iter, loss_hist[-1]))
                 sys.stdout.flush()
-            params = self._als_sweep(params, constants)
 
             if nesterov:
                 if iter >= 1 and loss_hist[-1] > loss_hist[-2]:
@@ -360,21 +355,21 @@ class AutoALS:
                     beta = 0.0
                 else:
                     beta = 1.0
-                if rank == 0:
-                    print(" beta = ", beta)
+                #if rank == 0 and verbose:
+                    #print(" beta = ", beta)
             else:
                 beta = 0.0
 
             if beta == 0.0:
-                append_x(self._als_sweep(x_hist[-1], constants))
+                append_x(self._one_sweep(x_hist[-1], constants))
             else:
                 x_tmp = {}
                 for name in target_tensor_names:
                     x_tmp[name] = x_hist[-1][name] + beta * (x_hist[-1][name] - x_hist[-2][name])
-                append_x(self._als_sweep(x_tmp, constants))
+                append_x(self._one_sweep(x_tmp, constants))
 
 
             if numpy.abs(loss_hist[-1]-loss_hist[-2]) < rtol * numpy.abs(loss_hist[-1]):
                 break
 
-        tensors_value.update(params)
+        tensors_value.update(x_hist[-1])
