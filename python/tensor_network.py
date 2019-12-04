@@ -198,8 +198,10 @@ class TensorNetwork(object):
 
         arrays = []
         for t in self.tensors:
+            if not t.name in values_of_tensors:
+                raise RuntimeError("Not found in values_of_tensors!: name={}".format(t.name))
             if t.shape != values_of_tensors[t.name].shape:
-                raise RuntimeError("Dimension mismatch between tensors and values_of_tensors!: name={}".format(t.shape))
+                raise RuntimeError("Dimension mismatch between tensors and values_of_tensors!: name={}, shape={} {}".format(t.name, t.shape, values_of_tensors[t.name].shape))
             if t.is_conj:
                 arrays.append(values_of_tensors[t.name].conjugate())
             else:

@@ -235,11 +235,11 @@ class TestMethods(unittest.TestCase):
         values = {}
         values['y1'] = numpy.array([1.0])
         values['a'] = numpy.array([[1.0]])
-        values['x'] = numpy.random.randn(N, N)
+        values['x'] = numpy.random.randn(N)
 
         auto_als.fit(niter=100, tensors_value=values)
 
-        opt_x = values['x'][0,0]
+        opt_x = values['x'][0]
         self.assertAlmostEqual(opt_x, 1/(reg_L2 + 1))
 
 

@@ -1,8 +1,11 @@
 from __future__ import print_function
 
 import numpy
+from collections import ChainMap
+from copy import deepcopy
 from .tensor_network import TensorNetwork, conj_a_b, differenciate, from_int_to_char_subscripts
 from scipy.sparse.linalg import LinearOperator, cg
+import sys
 
 def _mpi_split(work_size, comm_size):
     base = work_size // comm_size
@@ -251,6 +254,8 @@ class AutoALS:
             self._y_generators[t.name] = VectorGenerator(t, all_terms, comm, self._distributed)
 
         self._target_tensors = target_tensors
+        self._target_tensor_names = set([t.name for t in self._target_tensors])
+        self._reg_L2 = reg_L2
 
 
     def squared_error(self, tensors_value):
@@ -269,7 +274,36 @@ class AutoALS:
         else:
             return self._comm.allreduce(local_se)
 
-    def fit(self, niter, tensors_value):
+    def cost(self, tensors_value):
+        """
+        Evaluate cost function (squared error + L2 regularization)
+
+        :param tensor_value: dict of (str, ndarray)
+           Values of tensors (input)
+        :return:
+           Squared error
+        """
+
+        se = self.squared_error(tensors_value)
+        norm2 = numpy.sum([numpy.linalg.norm(tensors_value[name])**2 for name in self._target_tensor_names])
+        return se + self._reg_L2 * norm2
+
+    def _als_sweep(self, params, constants):
+        # One sweep of ALS
+        # Shallow copy
+        params_new = deepcopy(params)
+        tensors_value = ChainMap(params_new, constants)
+        for target_tensor in self._target_tensors:
+            name = target_tensor.name
+            opA = self._A_generators[name].construct(tensors_value)
+            vec_y = self._y_generators[name].construct(tensors_value)
+            # Note: A is a hermitian and semi positive definite.
+            r = cg(opA, vec_y, atol='legacy')
+            tensors_value[name][:] = r[0].reshape(tensors_value[name].shape)
+        return params_new
+
+
+    def fit(self, niter, tensors_value, rtol=1e-8, nesterov=True):
         """
         Perform ALS fitting
 
@@ -277,14 +311,70 @@ class AutoALS:
             Number of iterations
         :param tensor_value: dict of (str, ndarray)
             Values of tensors. Those of target tensors will be updated.
+        :param rtol: float
+            Relative torelance for loss
+        :param nesterov: bool
+            Use Nesterov's acceleration
         """
 
-        #TODO: Nesterov's acceleration, atol, rtol
+        rank = 0 if self._comm is None else self._comm.Get_rank()
+
+        target_tensor_names = set([t.name for t in self._target_tensors])
+
+        # Deep copy
+        params = {k: v.copy() for k, v in tensors_value.items() if k in target_tensor_names}
+
+        # Shallow copy
+        constants = {k: v for k, v in tensors_value.items() if not k in target_tensor_names}
+
+        x_hist = []
+        loss_hist = []
+
+        full = lambda x: ChainMap(x, constants)
+
+        # Record history
+        def append_x(x):
+            assert len(x_hist) == len(loss_hist)
+            if len(x_hist) > 2:
+                del x_hist[:-2]
+                del loss_hist[:-2]
+            x_hist.append(x)
+            loss_hist.append(self.cost(full(x)))
+
+        x0 = params
+        append_x(x0)
+        append_x(self._als_sweep(x0, constants))
+
+        #TODO: atol, rtol
+        beta = 1.0
         for iter in range(niter):
-            for target_tensor in self._target_tensors:
-                name = target_tensor.name
-                opA = self._A_generators[name].construct(tensors_value)
-                vec_y = self._y_generators[name].construct(tensors_value)
-                # Note: A is a hermitian and semi positive definite.
-                r = cg(opA, vec_y)
-                tensors_value[name][:] = r[0].reshape(tensors_value[name].shape)
+            if rank==0:
+                print('iter= {} loss= {}'.format(iter, loss_hist[-1]))
+                sys.stdout.flush()
+            params = self._als_sweep(params, constants)
+
+            if nesterov:
+                if iter >= 1 and loss_hist[-1] > loss_hist[-2]:
+                    x_hist[-1] = deepcopy(x_hist[-2])
+                    loss_hist[-1] = loss_hist[-2]
+                    beta = 0.0
+                else:
+                    beta = 1.0
+                if rank == 0:
+                    print(" beta = ", beta)
+            else:
+                beta = 0.0
+
+            if beta == 0.0:
+                append_x(self._als_sweep(x_hist[-1], constants))
+            else:
+                x_tmp = {}
+                for name in target_tensor_names:
+                    x_tmp[name] = x_hist[-1][name] + beta * (x_hist[-1][name] - x_hist[-2][name])
+                append_x(self._als_sweep(x_tmp, constants))
+
+
+            if numpy.abs(loss_hist[-1]-loss_hist[-2]) < rtol * numpy.abs(loss_hist[-1]):
+                break
+
+        tensors_value.update(params)
