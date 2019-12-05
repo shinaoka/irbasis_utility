@@ -8,7 +8,9 @@ import irbasis
 from irbasis_util.two_point_basis import *
 from irbasis_util.internal import *
 from irbasis_util.regression import *
-from irbasis_util.tensor_regression import fit, predict
+from irbasis_util.tensor_regression import predict
+from irbasis_util.tensor_regression_auto_als import fit
+#from irbasis_util.tensor_regression import fit
 
 class TestMethods(unittest.TestCase):
     def __init__(self, *args, **kwargs):
@@ -63,16 +65,15 @@ class TestMethods(unittest.TestCase):
 
             numpy.random.seed(100)
 
-
             x_tensors = fit(y, tensors_A, D, 100, verbose=1, x0=None,
-                            random_init=True, alpha=1e-8, comm=None, seed=1, nesterov=True)
+                            random_init=True, alpha=1e-2, comm=None, seed=1, nesterov=False)
 
             y_pred = predict(tensors_A, x_tensors)
 
             amax = numpy.amax(numpy.abs(y))
             adiff = numpy.amax(numpy.abs(y - y_pred))
 
-            print(adiff/amax)
+            print(adiff, amax)
             assert adiff/amax < 1e-1
 
 

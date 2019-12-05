@@ -67,6 +67,18 @@ class TestMethods(unittest.TestCase):
         assert tn2.tensors == [A, C, D]
         assert tn2.subscripts == [(0,1),(2,3),(3,-1)]
 
+    def test_tensor_network_removal2(self):
+        # Three tensors share one identical subscript.
+        N1, N2, N3, N4 = 2, 4, 6, 8
+        A = Tensor("A", (N1, N2))
+        B = Tensor("B", (N1, N3))
+        C = Tensor("C", (N1, N4))
+        tn = TensorNetwork([A, B, C], [(0,1),(0,2),(0,3)])
+        tn2 = tn.remove(A)
+
+        assert tn2.tensors == [B, C]
+        assert tn2.external_subscripts == (0,2,3)
+
     def test_tensor_network_multi_removal(self):
         N1, N2, N3, N4, N5 = 2, 4, 6, 8, 10
         A = Tensor("A", (N1, N2))

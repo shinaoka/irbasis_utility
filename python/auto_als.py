@@ -3,8 +3,8 @@ from __future__ import print_function
 import numpy
 from collections import ChainMap
 from copy import deepcopy
-from .tensor_network import TensorNetwork, conj_a_b, differenciate, from_int_to_char_subscripts
-from scipy.sparse.linalg import LinearOperator, cg
+from .tensor_network import Tensor, TensorNetwork, conj_a_b, differenciate, from_int_to_char_subscripts
+from scipy.sparse.linalg import LinearOperator, lgmres
 import sys
 
 def _mpi_split(work_size, comm_size):
@@ -44,6 +44,9 @@ class LeastSquaresOpGenerator(object):
              If True, the linear operator uses MPI parallelization
         """
         assert not target_tensor.is_conj
+
+        self._target_tensor = target_tensor
+
         # Tensor network for A
         self._A_tn = differenciate(term, [target_tensor.conjugate(), target_tensor])
         self._A_tn.find_contraction_path()
@@ -52,12 +55,14 @@ class LeastSquaresOpGenerator(object):
 
         A_subs = self._A_tn.external_subscripts
         op_subs, left_subs, right_subs = from_int_to_char_subscripts([A_subs, tc_subs, t_subs])
+        print("A_subs", A_subs, tc_subs)
 
         op_subs_str = ''.join(op_subs)
         left_subs_str = ''.join(left_subs)
         right_subs_str = ''.join(right_subs)
 
         self._matvec_str = '{},{}->{}'.format(op_subs_str, right_subs_str, left_subs_str)
+        self._rmatvec_str = '{},{}->{}'.format(op_subs_str, left_subs_str, right_subs_str)
         self._dims = target_tensor.shape
 
         self._comm = comm
@@ -87,6 +92,7 @@ class LeastSquaresOpGenerator(object):
             sizes, offsets = _mpi_split(N, self._comm.Get_size())
             start, end = offsets[rank], offsets[rank] + sizes[rank]
             A = op_array.reshape((N, N))[start:end, :]
+            conjA = (op_array.reshape((N, N))[:, start:end]).conjugate().transpose()
             if numpy.amin(sizes) == 0:
                 raise RuntimeError("sizes contains 0!")
 
@@ -95,21 +101,30 @@ class LeastSquaresOpGenerator(object):
                 self._comm.Allgatherv(numpy.dot(A,v).ravel(), [recv, sizes, offsets, mpi_type])
                 return recv
 
-            return LinearOperator((N, N), matvec=matvec)
+            def rmatvec(v):
+                recv = numpy.empty(N, dtype=A.dtype)
+                self._comm.Allgatherv(numpy.dot(conjA,v).ravel(), [recv, sizes, offsets, mpi_type])
+                return recv
+
+            return LinearOperator((N, N), matvec=matvec, rmatvec=rmatvec)
         else:
             matvec = lambda v: numpy.einsum(self._matvec_str, op_array, v.reshape(self._dims), optimize=True).ravel()
-            return LinearOperator((N, N), matvec=matvec)
+            rmatvec = lambda v : numpy.einsum(self._rmatvec_str, op_array, v.reshape(self._dims).conjugate(), optimize=True).conjugate().ravel()
+            return LinearOperator((N, N), matvec=matvec, rmatvec=rmatvec)
 
 
 def _sum_ops_flipped_sign(ops):
     # Compute sum of linear operators of the same shape and flip the sign
     matvec = lambda v: -sum([coeff * o.matvec(v) for coeff, o in ops])
+    rmatvec = lambda v: -sum([numpy.conj(coeff) * o.rmatvec(v) for coeff, o in ops])
     N1, N2 = ops[0][1].shape
-    return LinearOperator((N1, N2), matvec=matvec)
+    return LinearOperator((N1, N2), matvec=matvec, rmatvec=rmatvec)
 
 def _identity_operator(N):
     matvec = lambda v: v
-    return LinearOperator((N, N), matvec=matvec)
+    rmatvec = lambda v: v
+    return LinearOperator((N, N), matvec=matvec, rmatvec=rmatvec)
+
 
 class LinearOperatorGenerator(object):
     """
@@ -189,6 +204,7 @@ class AutoALS:
 
         assert _is_list_of_instance(Y, TensorNetwork)
         assert _is_list_of_instance(tilde_Y, TensorNetwork)
+        assert _is_list_of_instance(target_tensors, Tensor)
 
         if len(set([y.external_subscripts for y in Y + tilde_Y])) > 1:
             raise RuntimeError("Subscripts for external indices are not identical.")
@@ -203,12 +219,14 @@ class AutoALS:
             if numpy.any([t.is_conj for t in tilde_y.tensors]):
                 raise RuntimeError("Some tensor in tilde_Y is conjugate.")
             if numpy.count_nonzero([t in target_tensors for t in tilde_y.tensors]) == 0:
-                raise RuntimeError("tilde_y contains no target tensor.")
+                raise RuntimeError("tilde_y contains no target tensor. target_tensors={}, tilde_y".format(target_tensors, tilde_y))
 
         if numpy.any([t.is_conj for t in target_tensors]):
             raise RuntimeError("No target tensor can be conjugate.")
 
         self._comm = comm
+        if not isinstance(distributed_subscript, int) and not distributed_subscript is None:
+            raise RuntimeError("Wrong type of distributed_subscript!")
         self._distributed = not distributed_subscript is None
 
         # Check shape
@@ -298,7 +316,8 @@ class AutoALS:
             opA = self._A_generators[name].construct(tensors_value)
             vec_y = self._y_generators[name].construct(tensors_value)
             # Note: A is a hermitian and semi positive definite.
-            r = cg(opA, vec_y, atol='legacy')
+            #r = cg(opA, vec_y, atol='legacy')
+            r = lgmres(opA, vec_y, atol=0)
             tensors_value[name][:] = r[0].reshape(tensors_value[name].shape)
         return params_new
 
@@ -355,8 +374,8 @@ class AutoALS:
                     beta = 0.0
                 else:
                     beta = 1.0
-                #if rank == 0 and verbose:
-                    #print(" beta = ", beta)
+                if rank == 0:
+                    print(" beta = ", beta)
             else:
                 beta = 0.0
 
@@ -373,3 +392,4 @@ class AutoALS:
                 break
 
         tensors_value.update(x_hist[-1])
+        print(loss_hist)

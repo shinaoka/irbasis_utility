@@ -36,9 +36,9 @@ class Tensor(object):
 
     def __str__(self):
         if self._is_conj:
-            return "conj({}){}".format(self._name, self._shape)
+            return "conj(\"{}\"){}".format(self._name, self._shape)
         else:
-            return "{}{}".format(self._name, self._shape)
+            return "\"{}\"{}".format(self._name, self._shape)
 
     def __repr__(self):
         return self.__str__()
@@ -78,7 +78,7 @@ class Tensor(object):
 
 
 class TensorNetwork(object):
-    def __init__(self, tensors, subscripts):
+    def __init__(self, tensors, subscripts, external_subscripts=None):
         """
         Network of tensors
 
@@ -87,6 +87,9 @@ class TensorNetwork(object):
         :param subscripts: list of tuples of integers
             Specifies the subscripts for einstein summation
             Each tuple denotes the subscript of a tensor.
+        :param external_subscripts: set of tuples of integers
+            Specifies external subscripts for which the summation is not performed
+            If not specified, all subscripts appear only once are treated as external subscripts.
         """
 
         if len(tensors) != len(subscripts):
@@ -96,17 +99,22 @@ class TensorNetwork(object):
             if len(tensor.shape) != len(s):
                 raise RuntimeError("Dimension mismatch")
 
-        #unique_subscripts = numpy.unique(sum(subscripts, ()))
         unique_subscripts = _unique_order_preserved(sum(subscripts, ()))
 
         # Mark external subscript
         #  An external subscript appears only once.
         all_subscripts = numpy.array(sum(subscripts, ()))
-        self._is_external_subscript = []
-        for s in unique_subscripts:
-            self._is_external_subscript.append(numpy.count_nonzero(all_subscripts==s) == 1)
-
-        self._external_subscripts = tuple(unique_subscripts[self._is_external_subscript])
+        if external_subscripts is None:
+            mask = []
+            for s in unique_subscripts:
+                mask.append(numpy.count_nonzero(all_subscripts==s) == 1)
+            self._external_subscripts = tuple(unique_subscripts[mask])
+        elif isinstance(external_subscripts, set):
+            if not numpy.all([s in unique_subscripts for s in external_subscripts]):
+                raise RuntimeError('Invalid external_subscripts!')
+            self._external_subscripts = tuple([s for s in unique_subscripts if s in external_subscripts])
+        else:
+            raise RuntimeError('Invalid external_subscripts!')
 
         self._tensors = tensors
         self._unique_subscripts = tuple(unique_subscripts)
@@ -175,7 +183,7 @@ class TensorNetwork(object):
         """
 
         dummy_arrays = [numpy.empty(t.shape) for t in self._tensors]
-        self._contraction_path, string_repr = numpy.einsum_path(self._str_sub, *dummy_arrays, optimize=('optimal', 1E+18))
+        self._contraction_path, string_repr = numpy.einsum_path(self._str_sub, *dummy_arrays, optimize=('greedy', 1E+18))
 
         if verbose:
             print(string_repr)
@@ -247,14 +255,24 @@ class TensorNetwork(object):
             else:
                 return self.remove(tensor_to_be_removed[0])
 
+        # Note: we need to specify the external indices explicitly
+        #  (1) Any subscript appears only once is external.
+        #  (2) Any subscript of the removed tensor is external if it appears in the new tensor.
+        #  (3) Any external subscript of the original tensor network is external.
         new_tensors = []
         new_subscripts = []
+        new_extern_subs = {s for s in new_subscripts if numpy.count_nonzero(s in new_subscripts)==1}
+        new_extern_subs.update(self.external_subscripts)
         for t, s in zip(self.tensors, self.subscripts):
             if t == tensor_to_be_removed:
+                new_extern_subs.update(s)
                 continue
             new_tensors.append(t)
             new_subscripts.append(s)
-        return TensorNetwork(new_tensors, new_subscripts)
+
+        all_subs =_unique_order_preserved(sum(new_subscripts, ()))
+        new_extern_subs = set(numpy.intersect1d(all_subs, numpy.array(list(new_extern_subs))))
+        return TensorNetwork(new_tensors, new_subscripts, new_extern_subs)
 
 def conj_a_b(a, b):
     """

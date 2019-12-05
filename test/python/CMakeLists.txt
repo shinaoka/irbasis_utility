@@ -24,7 +24,7 @@ foreach(testfile ${TEST_FILES})
 endforeach()
 
 # Non-MPI tests
-set(python_test_src internal_test two_point_basis_test three_point_test four_point_test four_point_ph_view_test sampling_test regression_test tensor_network_test)
+set(python_test_src internal_test two_point_basis_test three_point_test four_point_test four_point_ph_view_test sampling_test regression_test tensor_network_test tensor_regression_test)
 foreach(test ${python_test_src})
     add_python_test(${test})
 endforeach(test)
