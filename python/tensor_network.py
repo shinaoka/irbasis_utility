@@ -144,10 +144,7 @@ class TensorNetwork(object):
         self._shape = tuple(shape)
 
     def __str__(self):
-        str1 =  ', '.join([t.__str__() for t in self._tensors])
-        str2 =  ', '.join([s.__str__() for s in self._subscripts])
-
-        return str1 + '\n' + str2
+        return '\n'.join([t.__str__() + ',subs=' + s.__str__() for t, s in zip(self._tensors, self._subscripts)])
 
     def __repr__(self):
         return self.__str__()

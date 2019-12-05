@@ -6,6 +6,7 @@ from copy import deepcopy
 from .tensor_network import Tensor, TensorNetwork, conj_a_b, differenciate, from_int_to_char_subscripts
 from scipy.sparse.linalg import LinearOperator, lgmres
 import sys
+import time
 
 def _mpi_split(work_size, comm_size):
     base = work_size // comm_size
@@ -24,6 +25,9 @@ def _is_list_of_instance(object, classinfo):
     Return True if the object is a list of instances of the classinfo argument.
     """
     return isinstance(object, list) and numpy.all([isinstance(o, classinfo) for o in object])
+
+def _trans_axes(src_subs, dst_subs):
+    return tuple([src_subs.index(s) for s in dst_subs])
 
 class LeastSquaresOpGenerator(object):
     """
@@ -46,6 +50,9 @@ class LeastSquaresOpGenerator(object):
         assert not target_tensor.is_conj
 
         self._target_tensor = target_tensor
+        self._comm = comm
+        self._distributed = distributed
+        self._parallel_solver = parallel_solver
 
         # Tensor network for A
         self._A_tn = differenciate(term, [target_tensor.conjugate(), target_tensor])
@@ -55,22 +62,21 @@ class LeastSquaresOpGenerator(object):
 
         A_subs = self._A_tn.external_subscripts
         op_subs, left_subs, right_subs = from_int_to_char_subscripts([A_subs, tc_subs, t_subs])
-        print("A_subs", A_subs, tc_subs)
 
-        op_subs_str = ''.join(op_subs)
-        left_subs_str = ''.join(left_subs)
-        right_subs_str = ''.join(right_subs)
+        self._op_is_matrix = len(left_subs) + len(right_subs) == len(op_subs)
+        self._use_matrix = self._parallel_solver and self._op_is_matrix
 
-        self._matvec_str = '{},{}->{}'.format(op_subs_str, right_subs_str, left_subs_str)
-        self._rmatvec_str = '{},{}->{}'.format(op_subs_str, left_subs_str, right_subs_str)
+        if self._use_matrix:
+            #Transpose axes of matrix
+            self._trans_axes = _trans_axes(op_subs, left_subs + right_subs)
+        else:
+            op_subs_str = ''.join(op_subs)
+            left_subs_str = ''.join(left_subs)
+            right_subs_str = ''.join(right_subs)
+            self._matvec_str = '{},{}->{}'.format(op_subs_str, right_subs_str, left_subs_str)
+            self._rmatvec_str = '{},{}->{}'.format(op_subs_str, left_subs_str, right_subs_str)
+
         self._dims = target_tensor.shape
-
-        self._comm = comm
-        self._distributed = distributed
-        self._parallel_solver = parallel_solver
-
-        self._op_is_matrix = (left_subs + right_subs == op_subs)
-
         self._size = numpy.prod(self._dims)
 
     @property
@@ -83,8 +89,10 @@ class LeastSquaresOpGenerator(object):
             op_array[:] = self._comm.allreduce(op_array)
 
         N = self._size
-        if self._parallel_solver and self._op_is_matrix:
+        if self._use_matrix:
             from mpi4py import MPI
+
+            op_array = op_array.transpose(self._trans_axes)
 
             mpi_type = MPI.COMPLEX if numpy.iscomplexobj(op_array) else MPI.DOUBLE
 
@@ -146,24 +154,26 @@ class LinearOperatorGenerator(object):
             ops.append((self._reg_L2, _identity_operator(N)))
         return _sum_ops_flipped_sign(ops)
 
-
 class VectorGenerator(object):
     """
     Differentiate sum of terms representing scalar tensors and construct a generator of vector to be fitted
     """
     def __init__(self, target_tensor, terms, comm, distributed):
         self._y_tn = []
+        self._trans_axes = []
         for coeff, term in terms:
             if (not term.has(target_tensor)) and term.has(target_tensor.conjugate()):
                 diff = differenciate(term, target_tensor.conjugate())
                 diff.find_contraction_path()
-                self._y_tn.append((coeff, diff))
+                t_subs = term.tensor_subscripts(target_tensor.conjugate())
+                trans_axes = _trans_axes(diff.external_subscripts, t_subs)
+                self._y_tn.append((coeff, diff, trans_axes))
         self._comm = comm
         self._distributed = distributed
 
     def construct(self, tensors_value):
         # Evaluate vector to be fitted
-        vec_y = sum([coeff * t.evaluate(tensors_value) for coeff, t in self._y_tn]).ravel()
+        vec_y = sum([coeff * t.evaluate(tensors_value).transpose(axes) for coeff, t, axes in self._y_tn]).ravel()
         if self._distributed:
             vec_y[:] = self._comm.allreduce(vec_y)
         return vec_y
@@ -362,9 +372,10 @@ class AutoALS:
         append_x(self._one_sweep(x0, constants))
 
         beta = 1.0
+        t_start = time.time()
         for iter in range(niter):
             if rank==0 and verbose:
-                print('iter= {} loss= {}'.format(iter, loss_hist[-1]))
+                print('iter= {} loss= {} walltime={}'.format(iter, loss_hist[-1], time.time()-t_start))
                 sys.stdout.flush()
 
             if nesterov:

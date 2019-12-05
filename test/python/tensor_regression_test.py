@@ -47,26 +47,25 @@ class TestMethods(unittest.TestCase):
     def test_als(self):
         numpy.random.seed(100)
 
-        Nw = 20
-        Nr = 2
-        linear_dim = 5
-        D = 10
+        Nw = 10
+        Nr = 10
+        linear_dim = 20
+        D = 5
         num_o = 2
-        alpha = 0.0
 
         def create_tensor_3(N, M, L):
             rand = numpy.random.rand(N, M, L) + 1J * numpy.random.rand(N, M, L)
             return rand
 
-        for freq_dim in [2, 3]:
+        for freq_dim in [1]:
             tensors_A = [create_tensor_3(Nw, Nr, linear_dim) for i in range(freq_dim)]
             y = numpy.random.randn(Nw, num_o) +\
                 1J * numpy.random.randn(Nw, num_o)
 
-            numpy.random.seed(100)
+            numpy.random.seed(200)
 
             x_tensors = fit(y, tensors_A, D, 100, verbose=1, x0=None,
-                            random_init=True, alpha=1e-2, comm=None, seed=1, nesterov=False)
+                            random_init=True, alpha=1e-8, comm=None, seed=1, nesterov=False)
 
             y_pred = predict(tensors_A, x_tensors)
 

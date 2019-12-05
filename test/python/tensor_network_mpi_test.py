@@ -24,29 +24,33 @@ class TestMethods(unittest.TestCase):
 
         numpy.random.seed(100 * rank + 100)
 
-        N1, N2 = 3, 10
-        y1 = Tensor("y1", (N1,))
-        y = TensorNetwork([y1], [(1,)])
+        Nw, Nr, D, Nl = 1, 2, 10, 7
+        y1 = Tensor("y1", (Nw,))
+        y = TensorNetwork([y1], [(0,)])
 
-        a = Tensor("a", (N1, N2))
-        x = Tensor("x", (N2,))
-        tilde_y = TensorNetwork([a, x], [(1,2),(2,)])
+        U = Tensor('U', (Nw, Nr, Nl))
+        x0 = Tensor('x0', (D, Nr))
+        x1 = Tensor('x1', (D, Nl))
+        tilde_y = TensorNetwork([U, x0, x1], [(0,10,30),(20,10),(20,30)])
 
-        auto_als = AutoALS(y, tilde_y, [x], comm=comm, distributed_subscript=1)
+        auto_als = AutoALS(y, tilde_y, [x0, x1], comm=comm, distributed_subscript=0)
 
         values = {}
         if comm.Get_rank() == 0:
-            y1_all = [numpy.random.randn(N1) for p in range(nproc)]
-            a_all = [numpy.random.randn(N1, N2) for p in range(nproc)]
-            values['x'] = numpy.random.randn(N2)
+            y1_all = [numpy.random.randn(Nw) for p in range(nproc)]
+            U_all = [numpy.random.randn(Nw, Nr, Nl) for p in range(nproc)]
+            values['x0'] = numpy.random.randn(D, Nr)
+            values['x1'] = numpy.random.randn(D, Nl)
         else:
             y1_all = None
-            a_all = None
-            values['x'] = None
+            U_all = None
+            values['x0'] = None
+            values['x1'] = None
 
         values['y1'] = comm.scatter(y1_all, root=0)
-        values['a'] = comm.scatter(a_all, root=0)
-        values['x'] = comm.bcast(values['x'], root=0)
+        values['U'] = comm.scatter(U_all, root=0)
+        values['x0'] = comm.bcast(values['x0'], root=0)
+        values['x1'] = comm.bcast(values['x1'], root=0)
 
         auto_als.fit(niter=100, tensors_value=values)
         self.assertLess(numpy.abs(auto_als.squared_error(values)), 1e-10)
