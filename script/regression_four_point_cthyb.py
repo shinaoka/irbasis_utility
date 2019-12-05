@@ -48,10 +48,10 @@ parser.add_argument('--niter', default=20, type=int, help='Number of iterations'
 parser.add_argument('--D', default=1, type=int, help='Rank of decomposition')
 parser.add_argument('--Lambda', default=1000.0, type=float, help='Lambda')
 parser.add_argument('--seed', default=1, type=int, help='seed')
-parser.add_argument('--nesterov', default=True, type=bool, help='nesterov')
+parser.add_argument('--nesterov', default=False, action='store_true', help='nesterov')
 parser.add_argument('--alpha', default=1e-8, type=float, help='regularization parameter')
 parser.add_argument('--scut', default=1e-4, type=float, help='Cutoff value for singular values')
-parser.add_argument('--vertex', default=False, type=bool, help='Vertex or not')
+parser.add_argument('--vertex', default=False, action='store_true', help='Vertex or not')
 
 args = parser.parse_args()
 if os.path.isfile(args.path_input_file) is False:
@@ -72,6 +72,7 @@ with h5py.File(args.path_input_file, 'r') as hf:
 if rank == 0:
     print("Lambda = ", Lambda)
     print("beta = ", beta)
+    print("nesterov = ", args.nesterov)
 
 # n1, n2, n3, n4 convention
 freqs = []
