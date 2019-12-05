@@ -330,8 +330,12 @@ class AutoALS:
             opA = self._A_generators[name].construct(tensors_value)
             vec_y = self._y_generators[name].construct(tensors_value)
             # FIXME: Is A a hermitian?
-            r = lgmres(opA, vec_y, atol=0)
-            tensors_value[name][:] = r[0].reshape(tensors_value[name].shape)
+            r = lgmres(opA, vec_y, tol=1e-10)
+            #print("res", numpy.linalg.norm(vec_y-opA(r[0])), numpy.linalg.norm(vec_y))
+            if self._comm is None:
+                tensors_value[name][:] = r[0].reshape(tensors_value[name].shape)
+            else:
+                tensors_value[name][:] = self._comm.bcast(r[0].reshape(tensors_value[name].shape), root=0)
         return params_new
 
 
