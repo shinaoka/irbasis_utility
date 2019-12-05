@@ -37,10 +37,10 @@ class TestMethods(unittest.TestCase):
 
         values = {}
         if comm.Get_rank() == 0:
-            y1_all = [numpy.random.randn(Nw) for p in range(nproc)]
-            U_all = [numpy.random.randn(Nw, Nr, Nl) for p in range(nproc)]
-            values['x0'] = numpy.random.randn(D, Nr)
-            values['x1'] = numpy.random.randn(D, Nl)
+            y1_all = [numpy.random.randn(Nw)+1J*numpy.random.randn(Nw) for p in range(nproc)]
+            U_all = [numpy.random.randn(Nw, Nr, Nl)+1J*numpy.random.randn(Nw, Nr, Nl) for p in range(nproc)]
+            values['x0'] = numpy.random.randn(D, Nr)+1J*numpy.random.randn(D, Nr)
+            values['x1'] = numpy.random.randn(D, Nl)+1J*numpy.random.randn(D, Nl)
         else:
             y1_all = None
             U_all = None

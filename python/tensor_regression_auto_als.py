@@ -10,6 +10,28 @@ from .tensor_network import Tensor, TensorNetwork
 from .auto_als import AutoALS
 
 
+def predict(prj, x_tensors):
+    xs_l = x_tensors[1:-1]
+    freq_dim = len(prj)
+    t1 = time.time()
+    nw, R, D = prj[0].shape[0], prj[0].shape[1], xs_l[0].shape[0]
+    num_o = x_tensors[-1].shape[1]
+
+    tmp_wrd = numpy.full((nw, R, D), complex(1.0))
+    # O(Nw R D Nl)
+    for i in range(freq_dim):
+        tmp_wrd *= numpy.einsum('wrl, dl -> wrd', prj[i], xs_l[i], optimize=True)
+    t2 = time.time()
+    # O(Nw R D)
+    tmp_wd = numpy.einsum('wrd, dr->wd', tmp_wrd, x_tensors[0], optimize=True)
+    t3 = time.time()
+    # O(Nw D No)
+    tmp_wo = numpy.einsum('wd, do->wo', tmp_wd, x_tensors[-1], optimize=True).reshape((nw, num_o))
+    t4 = time.time()
+    #print(t2-t1, t3-t2, t4-t3)
+    return tmp_wo
+
+
 def fit(y, prj, D, nite,  rtol = 1e-3, verbose=0, random_init=True, x0=None, alpha=1e-8, comm=None, seed=1, nesterov=True):
     """
     Alternating least squares with L2 regularization
@@ -30,8 +52,6 @@ def fit(y, prj, D, nite,  rtol = 1e-3, verbose=0, random_init=True, x0=None, alp
 
     rtol: float
         Stopping condition of optimization.
-        Iterations stop if abs(||r_k|| - ||r_{k-1}||) < rtol * ||y||
-        r_k is the residual vector at iteration k.
 
     verbose: int
         0, 1, 2

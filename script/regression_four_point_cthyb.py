@@ -14,11 +14,11 @@ import irbasis
 import matplotlib.pylab as plt
 from irbasis_util.four_point import from_PH_convention, FourPoint
 
-from irbasis_util.tensor_regression import fit, predict, enable_MPI
+from irbasis_util.tensor_regression_auto_als import fit, predict
 from mpi4py import MPI 
 
 
-enable_MPI() #for tensor_regression
+#enable_MPI() #for tensor_regression
 
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()

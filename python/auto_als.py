@@ -94,24 +94,28 @@ class LeastSquaresOpGenerator(object):
 
             op_array = op_array.transpose(self._trans_axes)
 
-            mpi_type = MPI.COMPLEX if numpy.iscomplexobj(op_array) else MPI.DOUBLE
+            to_mpitype = lambda x: MPI.COMPLEX16 if numpy.iscomplexobj(x) else MPI.DOUBLE
 
             rank = self._comm.Get_rank()
             sizes, offsets = _mpi_split(N, self._comm.Get_size())
             start, end = offsets[rank], offsets[rank] + sizes[rank]
             A = op_array.reshape((N, N))[start:end, :]
             conjA = (op_array.reshape((N, N))[:, start:end]).conjugate().transpose()
-            if numpy.amin(sizes) == 0:
-                raise RuntimeError("sizes contains 0!")
 
             def matvec(v):
-                recv = numpy.empty(N, dtype=A.dtype)
-                self._comm.Allgatherv(numpy.dot(A,v).ravel(), [recv, sizes, offsets, mpi_type])
+                Av = numpy.dot(A,v).ravel()
+                recv = numpy.empty(N, dtype=Av.dtype)
+                recv[:] = numpy.nan
+                mpi_type = to_mpitype(Av)
+                self._comm.Allgatherv([Av, len(Av), mpi_type], [recv, sizes, offsets, mpi_type])
                 return recv
 
             def rmatvec(v):
-                recv = numpy.empty(N, dtype=A.dtype)
-                self._comm.Allgatherv(numpy.dot(conjA,v).ravel(), [recv, sizes, offsets, mpi_type])
+                cAv = numpy.dot(conjA,v).ravel()
+                recv = numpy.empty(N, dtype=cAv.dtype)
+                recv[:] = numpy.nan
+                mpi_type = to_mpitype(cAv)
+                self._comm.Allgatherv([cAv, len(cAv), mpi_type], [recv, sizes, offsets, mpi_type])
                 return recv
 
             return LinearOperator((N, N), matvec=matvec, rmatvec=rmatvec)
@@ -325,8 +329,7 @@ class AutoALS:
             name = target_tensor.name
             opA = self._A_generators[name].construct(tensors_value)
             vec_y = self._y_generators[name].construct(tensors_value)
-            # Note: A is a hermitian and semi positive definite.
-            #r = cg(opA, vec_y, atol='legacy')
+            # FIXME: Is A a hermitian?
             r = lgmres(opA, vec_y, atol=0)
             tensors_value[name][:] = r[0].reshape(tensors_value[name].shape)
         return params_new
@@ -375,7 +378,7 @@ class AutoALS:
         t_start = time.time()
         for iter in range(niter):
             if rank==0 and verbose:
-                print('iter= {} loss= {} walltime={}'.format(iter, loss_hist[-1], time.time()-t_start))
+                print('iter= {} loss= {} walltime= {}'.format(iter, loss_hist[-1], time.time()-t_start))
                 sys.stdout.flush()
 
             if nesterov:
