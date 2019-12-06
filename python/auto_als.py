@@ -385,7 +385,7 @@ class AutoALS:
                 print('iter= {} loss= {} walltime= {}'.format(iter, loss_hist[-1], time.time()-t_start))
                 sys.stdout.flush()
 
-            if nesterov:
+            if nesterov and iter >= 10:
                 if iter >= 1 and loss_hist[-1] > loss_hist[-2]:
                     x_hist[-1] = deepcopy(x_hist[-2])
                     loss_hist[-1] = loss_hist[-2]
