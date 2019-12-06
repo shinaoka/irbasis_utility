@@ -107,7 +107,7 @@ class augmented_ortho_basis_b(object):
         self._ulx_tmp = numpy.zeros((self._dim+2,))
         self._uln_tmp = numpy.zeros((self._dim+2,), dtype=complex)
 
-        # Gram–Schmidt orthonormalization
+        # Gram-Schmidt orthonormalization
         # TODO: make use of even/odd properties
         self._coeff = numpy.eye(self._dim, self._dim+2)
         deg = 20

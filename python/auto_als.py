@@ -1,7 +1,10 @@
 from __future__ import print_function
 
 import numpy
-from collections import ChainMap
+try:
+    from collections import ChainMap
+except ImportError:
+    from chainmap import ChainMap
 from copy import deepcopy
 from .tensor_network import Tensor, TensorNetwork, conj_a_b, differenciate, from_int_to_char_subscripts
 from scipy.sparse.linalg import LinearOperator, lgmres
@@ -84,14 +87,20 @@ class LeastSquaresOpGenerator(object):
         return self._size
 
     def construct(self, tensors_value):
-        op_array = self._A_tn.evaluate(tensors_value)
-        if self._distributed:
-            op_array[:] = self._comm.allreduce(op_array)
-
-        N = self._size
-        if self._use_matrix:
+        if self._comm is not None:
             from mpi4py import MPI
 
+        #t1 = time.time()
+        op_array = self._A_tn.evaluate(tensors_value)
+        #t2 = time.time()
+        if self._distributed:
+            recv = numpy.empty_like(op_array)
+            self._comm.Allreduce(op_array, recv, MPI.SUM)
+            op_array = recv
+        #t3 = time.time()
+        #print('const: ', t2-t1, t3-t2, op_array.shape)
+        N = self._size
+        if self._use_matrix:
             op_array = op_array.transpose(self._trans_axes)
 
             to_mpitype = lambda x: MPI.COMPLEX16 if numpy.iscomplexobj(x) else MPI.DOUBLE
@@ -311,10 +320,15 @@ class AutoALS:
         tensors_value = ChainMap(params_new, constants)
         for target_tensor in self._target_tensors:
             name = target_tensor.name
+            t1 = time.time()
             opA = self._A_generators[name].construct(tensors_value)
+            t2 = time.time()
             vec_y = self._y_generators[name].construct(tensors_value)
+            t3 = time.time()
             # FIXME: Is A a hermitian?
             r = lgmres(opA, vec_y, tol=1e-10)
+            t4 = time.time()
+            print(name, t2-t1, t3-t2, t4-t3)
             #print("res", numpy.linalg.norm(vec_y-opA(r[0])), numpy.linalg.norm(vec_y))
             if self._comm is None:
                 tensors_value[name][:] = r[0].reshape(tensors_value[name].shape)

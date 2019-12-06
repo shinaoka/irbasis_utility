@@ -218,8 +218,7 @@ class TensorNetwork(object):
             else:
                 arrays.append(values_of_tensors[t.name])
 
-        r = numpy.einsum(self._str_sub, *arrays, optimize=self._contraction_path)
-        return r
+        return numpy.ascontiguousarray(numpy.einsum(self._str_sub, *arrays, optimize=self._contraction_path))
 
     def find_tensor(self, tensor):
         """
