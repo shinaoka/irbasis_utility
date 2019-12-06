@@ -55,6 +55,9 @@ class TestMethods(unittest.TestCase):
         tn = TensorNetwork([A, B], [(3, 1), (1, 2)])
         self.assertEqual(tn.external_subscripts, (3, 2))
 
+        tn_copy = tn.copy(external_subscripts=(2, 3))
+        self.assertEqual(tn_copy.external_subscripts, (2, 3))
+
     def test_tensor_network_removal(self):
         N1, N2, N3, N4, N5 = 2, 4, 6, 8, 10
         A = Tensor("A", (N1, N2))

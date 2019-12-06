@@ -243,22 +243,6 @@ class AutoALS:
             raise RuntimeError("Wrong type of distributed_subscript!")
         self._distributed = not distributed_subscript is None
 
-        # Check shape
-        """
-        if not distributed_subscript is None:
-            if self._comm is None:
-                raise RuntimeError("Enable MPI!")
-            # Check all dimensions but distributed subscript
-            if not distributed_subscript in y.external_subscripts:
-                raise RuntimeError("Set correct distributed_subscript!")
-            idx = Y[0].external_subscripts.index(distributed_subscript)
-            shapes = self._comm.allgather(numpy.delete(numpy.array(y.shape), idx))
-            if not numpy.all(shapes[0] == shapes):
-                raise RuntimeError("Shape mismatch of y tensor on different nodes!")
-        else:
-            self._distributed = False
-        """
-
         def dot_product(a, b):
             ab = conj_a_b(a[1], b[1])
             ab.find_contraction_path()

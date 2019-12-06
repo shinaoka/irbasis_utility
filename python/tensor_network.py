@@ -17,7 +17,7 @@ def _to_alphabet(i):
 class Tensor(object):
     def __init__(self, name, shape, is_conj=False):
         """
-        Tensor
+        Tensor (immutable)
 
         :param name: str
             Name of tensor
@@ -87,9 +87,11 @@ class TensorNetwork(object):
         :param subscripts: list of tuples of integers
             Specifies the subscripts for einstein summation
             Each tuple denotes the subscript of a tensor.
-        :param external_subscripts: set of tuples of integers
+        :param external_subscripts: tuple, array-like, list, set of integers
             Specifies external subscripts for which the summation is not performed
             If not specified, all subscripts appear only once are treated as external subscripts.
+            By default, the external subscripts are sorted in the order in which they appear in the list of tensors.
+            If a list or an array-like is given, it determine the order of the external subscripts.
         """
 
         if len(tensors) != len(subscripts):
@@ -101,10 +103,9 @@ class TensorNetwork(object):
 
         unique_subscripts = _unique_order_preserved(sum(subscripts, ()))
 
-        # Mark external subscript
-        #  An external subscript appears only once.
         all_subscripts = numpy.array(sum(subscripts, ()))
         if external_subscripts is None:
+            # External subscripts appear only once.
             mask = []
             for s in unique_subscripts:
                 mask.append(numpy.count_nonzero(all_subscripts==s) == 1)
@@ -113,8 +114,13 @@ class TensorNetwork(object):
             if not numpy.all([s in unique_subscripts for s in external_subscripts]):
                 raise RuntimeError('Invalid external_subscripts!')
             self._external_subscripts = tuple([s for s in unique_subscripts if s in external_subscripts])
+        elif isinstance(external_subscripts, list) or isinstance(external_subscripts, tuple)\
+                or isinstance(external_subscripts, numpy.ndarray):
+            if not numpy.all([s in unique_subscripts for s in external_subscripts]):
+                raise RuntimeError('Invalid external_subscripts!'.format(external_subscripts))
+            self._external_subscripts = tuple(external_subscripts)
         else:
-            raise RuntimeError('Invalid external_subscripts!')
+            raise RuntimeError('Invalid external_subscripts!'.format(external_subscripts))
 
         self._tensors = tensors
         self._unique_subscripts = tuple(unique_subscripts)
@@ -236,12 +242,30 @@ class TensorNetwork(object):
 
         return self._subscripts[self._tensors.index(tensor)]
 
-    def remove(self, tensor_to_be_removed):
+    def copy(self, external_subscripts=None):
+        """
+        Make a copy
+
+        :param external_subscripts: tuples of integers or 1D array
+            Specifies the order of external subscripts
+        :return:
+           New tensor network object
+        """
+
+        if external_subscripts is None:
+            return TensorNetwork(self.tensors, self.subscripts, self.external_subscripts)
+        else:
+            return TensorNetwork(self.tensors, self.subscripts, external_subscripts)
+
+
+    def remove(self, tensor_to_be_removed, external_subscripts=None):
         """
         Make a new tensor network object by removing a tensor
 
         :param tensors_to_be_removed: Tensor or list of tensors
            Tensor(s) to be removed.
+        :param external_subscripts: tuples of integers
+            Specifies the order of external subscripts
         :return:
            New tensor network object
         """
@@ -269,7 +293,10 @@ class TensorNetwork(object):
 
         all_subs =_unique_order_preserved(sum(new_subscripts, ()))
         new_extern_subs = set(numpy.intersect1d(all_subs, numpy.array(list(new_extern_subs))))
-        return TensorNetwork(new_tensors, new_subscripts, new_extern_subs)
+        if external_subscripts is None:
+            return TensorNetwork(new_tensors, new_subscripts, new_extern_subs)
+        else:
+            raise RuntimeError('Invalid external_subscripts!'.format(external_subscripts))
 
 def conj_a_b(a, b):
     """
@@ -342,7 +369,7 @@ def from_int_to_char_subscripts(subscripts):
     mapping = {unique_subscripts[i] : _to_alphabet(i) for i in range(len(unique_subscripts))}
     return [list(map(lambda x: mapping[x], s)) for s in subscripts]
 
-def differenciate(tensor_network, tensors):
+def differenciate(tensor_network, tensors, external_subscripts=None):
     """
     Differenciate a tensor network w.r.t tensor(s).
 
@@ -350,6 +377,10 @@ def differenciate(tensor_network, tensors):
         Tensor network to be differentiated
     :param tensors: Tensor
         Tensors
+    :param external_subscripts: tuple, array-like, list, set of integers
+        Specifies the order of external subscripts.
+        If not specified, the external subscripts are sorted in the order in which
+        they appear in the tensors of the resultant tensor network.
     :return: TensorNetwork
         Result of differentiation
     """
@@ -370,4 +401,4 @@ def differenciate(tensor_network, tensors):
             if t1 == t2:
                 raise RuntimeError("Unsupported: tensors must not contain multiple equivalent tensors.")
 
-    return tensor_network.remove(tensors)
+    return tensor_network.remove(tensors).copy(external_subscripts)
