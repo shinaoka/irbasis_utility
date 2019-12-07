@@ -51,6 +51,7 @@ class LeastSquaresOpGenerator(object):
              If True, the linear operator uses MPI parallelization
         """
         assert not target_tensor.is_conj
+        assert not parallel_solver
 
         self._target_tensor = target_tensor
         self._comm = comm
@@ -275,7 +276,7 @@ class AutoALS:
         self._A_generators = {}
         self._y_generators = {}
         for t in target_tensors:
-            self._A_generators[t.name] = LinearOperatorGenerator(t, all_terms, comm, self._distributed, not self._comm is None, reg_L2)
+            self._A_generators[t.name] = LinearOperatorGenerator(t, all_terms, comm, self._distributed, False, reg_L2)
             self._y_generators[t.name] = VectorGenerator(t, all_terms, comm, self._distributed)
 
         self._target_tensors = target_tensors
@@ -328,7 +329,7 @@ class AutoALS:
             # FIXME: Is A a hermitian?
             r = lgmres(opA, vec_y, tol=1e-10)
             t4 = time.time()
-            print(name, t2-t1, t3-t2, t4-t3)
+            #print(name, t2-t1, t3-t2, t4-t3)
             #print("res", numpy.linalg.norm(vec_y-opA(r[0])), numpy.linalg.norm(vec_y))
             if self._comm is None:
                 tensors_value[name][:] = r[0].reshape(tensors_value[name].shape)
@@ -408,4 +409,4 @@ class AutoALS:
                 break
 
         tensors_value.update(x_hist[-1])
-        print(loss_hist)
+        #print(loss_hist)
