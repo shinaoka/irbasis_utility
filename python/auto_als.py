@@ -327,7 +327,7 @@ class AutoALS:
             vec_y = self._y_generators[name].construct(tensors_value)
             t3 = time.time()
             # FIXME: Is A a hermitian?
-            r = lgmres(opA, vec_y, tol=1e-10)
+            r = lgmres(opA, vec_y, tol=1e-10, x0=tensors_value[name].ravel())
             t4 = time.time()
             #print(name, t2-t1, t3-t2, t4-t3)
             #print("res", numpy.linalg.norm(vec_y-opA(r[0])), numpy.linalg.norm(vec_y))

@@ -122,7 +122,7 @@ class TestMethods(unittest.TestCase):
 
         c.find_contraction_path()
         cv2 = c.evaluate({"a1" : a1v, "a2" : a2v, "b1" : b1v, "b2" : b2v})
-        self.assertAlmostEqual(cv, cv2)
+        numpy.testing.assert_allclose(cv, cv2)
 
     def test_auto_als(self):
         """
