@@ -4,6 +4,8 @@ irbasis utility
 ======
 Utility library for irbasis: support for two-point Green's function, three-point Green's function.<br>
 This software is released under the MIT License, see LICENSE.txt. 
+The files in the opt_einsum directory are originally from the opt_einsum packakge,
+and they are licensed under the MIT License as well.
 
 ## Requirements
 * irbasis >= 1.0.2
