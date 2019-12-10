@@ -105,7 +105,7 @@ class LeastSquaresOpGenerator(object):
 
             to_mpitype = lambda x: MPI.COMPLEX16 if numpy.iscomplexobj(x) else MPI.DOUBLE
 
-            rank = self._comm.Get_rank()
+            rank = self._comm.Get_rank() 
             sizes, offsets = _mpi_split(N, self._comm.Get_size())
             start, end = offsets[rank], offsets[rank] + sizes[rank]
             A = op_array.reshape((N, N))[start:end, :]
@@ -280,7 +280,7 @@ class AutoALS:
         self._A_generators = {}
         self._y_generators = {}
         for t in target_tensors:
-            self._A_generators[t.name] = LinearOperatorGenerator(t, all_terms, comm, self._distributed, True, reg_L2, self._rank==0, self._mem_limit)
+            self._A_generators[t.name] = LinearOperatorGenerator(t, all_terms, comm, self._distributed, not comm is None, reg_L2, self._rank==0, self._mem_limit)
             self._y_generators[t.name] = VectorGenerator(t, all_terms, comm, self._distributed)
 
         self._target_tensors = target_tensors

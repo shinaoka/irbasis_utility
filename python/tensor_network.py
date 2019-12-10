@@ -1,6 +1,8 @@
 from __future__ import print_function
 
 import numpy
+import opt_einsum as oe
+import time
 
 def _to_alphabet(i):
     """
@@ -188,10 +190,16 @@ class TensorNetwork(object):
         dummy_arrays = [numpy.empty(t.shape) for t in self._tensors]
         if mem_limit is None:
             mem_limit = 1E+18
-        self._contraction_path, string_repr = numpy.einsum_path(self._str_sub, *dummy_arrays, optimize=('greedy', mem_limit))
-
+        t1 = time.time()
+        #self._contraction_path, string_repr = numpy.einsum_path(self._str_sub, *dummy_arrays, optimize=('greedy', mem_limit))
+        #contraction_path, string_repr = oe.contract_path(self._str_sub, *dummy_arrays, optimize='dynamic-programming')
+        contraction_path, string_repr = oe.contract_path(self._str_sub, *dummy_arrays, optimize='branch-2')
+        self._contraction_path = ['einsum_path'] + contraction_path
+        t2 = time.time()
         if verbose:
+            print("Finding contraction path took ", t2-t1, " sec.")
             print(string_repr)
+            print("Contruction path: ", self._contraction_path)
 
     def has(self, tensor):
         return tensor in self._tensors
