@@ -179,14 +179,16 @@ class TensorNetwork(object):
     def unique_subscripts(self):
         return self._unique_subscripts
 
-    def find_contraction_path(self, verbose=False):
+    def find_contraction_path(self, verbose=False, mem_limit=None):
         """
         Find a path for contracting tensors
         The subscripts of the contracted tensor are ordered in ascending order from left to right.
         """
 
         dummy_arrays = [numpy.empty(t.shape) for t in self._tensors]
-        self._contraction_path, string_repr = numpy.einsum_path(self._str_sub, *dummy_arrays, optimize=('greedy', 1E+18))
+        if mem_limit is None:
+            mem_limit = 1E+18
+        self._contraction_path, string_repr = numpy.einsum_path(self._str_sub, *dummy_arrays, optimize=('greedy', mem_limit))
 
         if verbose:
             print(string_repr)

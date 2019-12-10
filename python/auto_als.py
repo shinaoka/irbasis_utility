@@ -36,7 +36,7 @@ class LeastSquaresOpGenerator(object):
     """
     Coefficient matrix of a least squares problem
     """
-    def __init__(self, target_tensor, term, comm, distributed, parallel_solver):
+    def __init__(self, target_tensor, term, comm, distributed, parallel_solver, verbose=False, mem_limit=1E+19):
         """
 
         :param target_tensor: Tensor
@@ -51,7 +51,6 @@ class LeastSquaresOpGenerator(object):
              If True, the linear operator uses MPI parallelization
         """
         assert not target_tensor.is_conj
-        assert not parallel_solver
 
         self._target_tensor = target_tensor
         self._comm = comm
@@ -60,7 +59,7 @@ class LeastSquaresOpGenerator(object):
 
         # Tensor network for A
         self._A_tn = differenciate(term, [target_tensor.conjugate(), target_tensor])
-        self._A_tn.find_contraction_path()
+        self._A_tn.find_contraction_path(verbose, mem_limit)
         tc_subs = term.tensor_subscripts(target_tensor.conjugate())
         t_subs = term.tensor_subscripts(target_tensor)
 
@@ -152,11 +151,11 @@ class LinearOperatorGenerator(object):
     """
     Differentiate sum of terms representing scalar tensors and construct a generator of LinearOperator
     """
-    def __init__(self, target_tensor, terms, comm, distributed, parallel_solver, reg_L2):
+    def __init__(self, target_tensor, terms, comm, distributed, parallel_solver, reg_L2, verbose, mem_limit):
         self._generators = []
         for coeff, term in terms:
             if term.has(target_tensor) and term.has(target_tensor.conjugate()):
-                genA = LeastSquaresOpGenerator(target_tensor, term, comm, distributed, parallel_solver)
+                genA = LeastSquaresOpGenerator(target_tensor, term, comm, distributed, parallel_solver, verbose, mem_limit)
                 self._generators.append((coeff, genA))
         self._reg_L2 = reg_L2
 
@@ -201,7 +200,7 @@ class AutoALS:
     """
     Automated alternating least squares fitting of tensor network
     """
-    def __init__(self, Y, tilde_Y, target_tensors, reg_L2=0.0, comm=None, distributed_subscript=None):
+    def __init__(self, Y, tilde_Y, target_tensors, reg_L2=0.0, comm=None, distributed_subscript=None, mem_limit=1E+19):
         """
 
         :param Y: a list of TensorNetwork
@@ -219,6 +218,8 @@ class AutoALS:
             Subscript of the distributed index
             If this is not None, ONE of the external indices of y and tilde_y is distributed on different MPI nodes.
             That index can have different sizes on different processes.
+        :param mem_limit: Integer
+            mememory limit for einsum_path. 1E+8 * 16 Byte = 1.6 GB
         """
 
         if isinstance(Y, TensorNetwork):
@@ -232,6 +233,8 @@ class AutoALS:
 
         if len(set([y.external_subscripts for y in Y + tilde_Y])) > 1:
             raise RuntimeError("Subscripts for external indices are not identical.")
+
+        self._mem_limit = 1E+20 if mem_limit is None else mem_limit
 
         # No tensor must be conjugate.
         for y in Y:
@@ -249,6 +252,7 @@ class AutoALS:
             raise RuntimeError("No target tensor can be conjugate.")
 
         self._comm = comm
+        self._rank = 0 if self._comm is None else self._comm.Get_rank()
         if not isinstance(distributed_subscript, int) and not distributed_subscript is None:
             raise RuntimeError("Wrong type of distributed_subscript!")
         self._distributed = not distributed_subscript is None
@@ -276,7 +280,7 @@ class AutoALS:
         self._A_generators = {}
         self._y_generators = {}
         for t in target_tensors:
-            self._A_generators[t.name] = LinearOperatorGenerator(t, all_terms, comm, self._distributed, False, reg_L2)
+            self._A_generators[t.name] = LinearOperatorGenerator(t, all_terms, comm, self._distributed, True, reg_L2, self._rank==0, self._mem_limit)
             self._y_generators[t.name] = VectorGenerator(t, all_terms, comm, self._distributed)
 
         self._target_tensors = target_tensors
