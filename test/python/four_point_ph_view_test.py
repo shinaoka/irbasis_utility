@@ -2,6 +2,7 @@ from __future__ import print_function
 import unittest
 import numpy
 import irbasis
+import sparse
 
 from irbasis_util.two_point_basis import *
 from irbasis_util.four_point_ph_view import *
@@ -71,16 +72,11 @@ class TestMethods(unittest.TestCase):
         boson_freq = 10
         Lambda = 10.0
         beta = 0.2
-        alpha = 1e-15
         augmented = True
-        wmax = Lambda / beta
         phb = FourPointPHView(boson_freq, Lambda, beta, 1e-5, augmented)
         Nl = phb.Nl
-        whichl = Nl - 1
-        pole = 0.2 * wmax
         # build the sampling frequency structure
         sp = [(0,0), (0,1), (1,0)]
-        n_sp = len(sp)
 
         # prj: (n_sp, 3, 2, 2, Nl, Nl)
         # prj_decomposed: [(n_sp, 3, 2, 2, Nl), (n_sp, 3, 2, 2, Nl)]
@@ -95,6 +91,13 @@ class TestMethods(unittest.TestCase):
         S_decomposed = phb.normalized_S(decomposed_form=True)
         S_composed = numpy.einsum('nijk,nijl->nijkl', S_decomposed[0], S_decomposed[1])
         self.assertTrue(numpy.allclose(S, S_composed, atol = 1e-10))
+
+        # sparse projector
+        prj_freq, Uol, ovec = phb.sparse_projector_to_matsubara(sp)
+
+        prj_from_sparse = numpy.einsum('wrstOP,Ol,Pm->wrstlm', prj_freq.todense(), Uol, Uol)
+
+        numpy.testing.assert_allclose(prj_from_sparse, prj, atol=1e-10)
 
     def test_sampling_points_matsubara(self):
         boson_freq = 10

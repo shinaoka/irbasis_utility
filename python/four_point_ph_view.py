@@ -71,6 +71,59 @@ class FourPointPHView(object):
                 svec[2, s1, s2, :, :] = sb[:, None] * sf[None, :]
             return svec
 
+    def sparse_projector_to_matsubara(self, n1_n2_vec):
+        """
+        Return a sparse projector from IR to Matsubara frequencies
+        """
+        # Find all one-particle frequencies appear and compute U_{nl} for them
+        import sparse
+
+        o_f = []
+        o_b = []
+        for i in range(len(n1_n2_vec)):
+            o1 = 2*n1_n2_vec[i][0] + 1
+            o2 = 2*n1_n2_vec[i][1] + 1
+            o_f.append(o1)
+            o_f.append(o2)
+            o_f.append(o1 + self._o)
+            o_f.append(o2 + self._o)
+            o_b.append(o1 - o2)
+            o_b.append(o1 + o2 + self._o)
+            o_b.append(o2 - o1)
+            o_b.append(o2 + o1 + self._o)
+        o_f = numpy.unique(o_f)
+        o_b = numpy.unique(o_b)
+
+        Unl_f = self._Bf.compute_Unl(list(map(o_to_matsubara_idx_f, o_f)))[:,0:self._Nl]
+        Unl_b = self._Bb.compute_Unl(list(map(o_to_matsubara_idx_b, o_b)))[:,0:self._Nl]
+        Unl_fb = numpy.vstack((Unl_f, Unl_b))
+        o_fb = numpy.hstack((o_f, o_b))
+        num_o = len(o_fb)
+
+        def index_o(s, o):
+            return numpy.where(o_fb==o+s*self._o)[0][0]
+
+        prj_freq_data = []
+        prj_freq_coords = [[] for i in range(6)]
+        def append_coord(new_coord):
+            for i, c in enumerate(new_coord):
+                prj_freq_coords[i].append(c)
+
+        for idx_n1n2, (n1, n2) in enumerate(n1_n2_vec):
+            o1, o2 = 2*n1 + 1, 2*n2 + 1
+            for s1, s2 in product(range(self._nshift), repeat=2):
+                sign = -1 * _sign(s1)
+                o_list = [(o1,o2), (o1 + sign * o2, o2), (o2 + sign * o1, o1)]
+                for r in range(3):
+                    prj_freq_data.append(1)
+                    append_coord((idx_n1n2, r, s1, s2, index_o(s1,o_list[r][0]), index_o(s2, o_list[r][1])))
+
+        prj_freq = sparse.COO(prj_freq_coords, numpy.array(prj_freq_data, dtype='int16'), shape=(len(n1_n2_vec),3,2,2,num_o,num_o))
+
+        return prj_freq, Unl_fb, o_fb
+
+
+
     def projector_to_matsubara_vec(self, n1_n2_vec, decomposed_form = False):
         """
         Return a projector from IR to Matsubara frequencies
@@ -134,6 +187,7 @@ class FourPointPHView(object):
                 M[1, s1, s2, :, :] = self._get_Usol(s1, o1 + sign * o2)[:, None] * self._get_Usol(s2, o2)[None, :]
                 M[2, s1, s2, :, :] = self._get_Usol(s1, o2 + sign * o1)[:, None] * self._get_Usol(s2, o1)[None, :]
             return M
+
 
     def sampling_points_matsubara(self, whichl, full_freqs=True, target_repr=None):
         """
