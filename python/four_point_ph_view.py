@@ -75,16 +75,16 @@ class FourPointPHView(object):
         num_w = len(n1_n2_vec)
         n_shift = 2
         num_mat = 2
-        o_list = numpy.empty((num_w, n_shift, n_shift, 3, num_mat), dtype="int16")
+        o_list = numpy.empty((num_w, 3, n_shift, n_shift, num_mat), dtype="int32")
         for i in range(len(n1_n2_vec)):
             o1 = 2*n1_n2_vec[i][0] + 1
             o2 = 2*n1_n2_vec[i][1] + 1
             for s1, s2 in product(range(self._nshift), repeat=2):
                 sign = -1 * _sign(s1)
                 # For three representations
-                o_list[i, s1, s2, 0, :] = (o1 + s1*self._o, o2 + s2*self._o)
-                o_list[i, s1, s2, 1, :] = (o1 + sign * o2 + s1*self._o, o2 + s2*self._o)
-                o_list[i, s1, s2, 2, :] = (o2 + sign * o1 + s1*self._o, o1 + s2*self._o)
+                o_list[i, 0, s1, s2, :] = (o1 + s1*self._o, o2 + s2*self._o)
+                o_list[i, 1, s1, s2, :] = (o1 + sign * o2 + s1*self._o, o2 + s2*self._o)
+                o_list[i, 2, s1, s2, :] = (o2 + sign * o1 + s1*self._o, o1 + s2*self._o)
         return o_list
 
     def sparse_projector_to_matsubara(self, n1_n2_vec):
@@ -111,30 +111,17 @@ class FourPointPHView(object):
         o_fb = numpy.hstack((o_f, o_b))
         num_o = len(o_fb)
 
-        def index_o(o):
-            return numpy.where(o_fb==o)[0][0]
+        find_o = lambda o: numpy.where(o_fb==o)[0][0]
 
-        prj_freq_data = []
-        prj_freq_coords = [[] for i in range(6)]
-        def append_coord(new_coord):
-            for i, c in enumerate(new_coord):
-                prj_freq_coords[i].append(c)
-
+        prj_freq = []
         for imat in range(num_mat):
-            prj_freq_data = []
-            prj_freq_coords = []
-            for idx_n1n2 in range(num_w):
-                for s1, s2, r in product(range(self._nshift), range(self._nshift), range(3)):
-                    prj_freq_coords.append(index_o(o_list[idx_n1n2, s1, s2, r, imat]))
+            prj_freq_coords = numpy.empty((num_w*3*n_shift*n_shift, 5), dtype='int32')
+            for i, (idx_n1n2, r, s1, s2) in enumerate(product(range(num_w), range(3), range(self._nshift), range(self._nshift))):
+                prj_freq_coords[i, :] = (idx_n1n2, r, s1, s2, find_o(o_list[idx_n1n2, r, s1, s2, imat]))
 
-        for idx_n1n2 in range(num_w):
-            for s1, s2 in product(range(self._nshift), repeat=2):
-                freqs = o_list[idx_n1n2, s1, s2, :, :]
-                for r in range(3):
-                    prj_freq_data.append(1)
-                    append_coord((idx_n1n2, r, s1, s2, index_o(freqs[r,0]), index_o(freqs[r,1])))
-
-        prj_freq = sparse.COO(prj_freq_coords, numpy.array(prj_freq_data, dtype='int16'), shape=(len(n1_n2_vec),3,2,2,num_o,num_o))
+            prj_freq_coords = prj_freq_coords.transpose()
+            N = prj_freq_coords.shape[1]
+            prj_freq.append(sparse.COO(prj_freq_coords, numpy.ones(N, dtype='int32'), shape=(num_w,3,n_shift,n_shift,num_o)))
 
         return prj_freq, Unl_fb, o_fb
 
