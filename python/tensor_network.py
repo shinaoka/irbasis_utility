@@ -377,7 +377,7 @@ def from_int_to_char_subscripts(subscripts):
     mapping = {unique_subscripts[i] : _to_letter(i) for i in range(len(unique_subscripts))}
     return [list(map(lambda x: mapping[x], s)) for s in subscripts]
 
-def differenciate(tensor_network, tensors, external_subscripts=None):
+def differentiate(tensor_network, tensors, external_subscripts=None):
     """
     Differenciate a tensor network w.r.t tensor(s).
 

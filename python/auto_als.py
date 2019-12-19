@@ -6,7 +6,7 @@ try:
 except ImportError:
     from chainmap import ChainMap
 from copy import deepcopy
-from .tensor_network import Tensor, TensorNetwork, conj_a_b, differenciate, from_int_to_char_subscripts
+from .tensor_network import Tensor, TensorNetwork, conj_a_b, differentiate, from_int_to_char_subscripts
 from scipy.sparse.linalg import LinearOperator, lgmres
 import sys
 import time
@@ -58,7 +58,7 @@ class LeastSquaresOpGenerator(object):
         self._parallel_solver = parallel_solver
 
         # Tensor network for A
-        self._A_tn = differenciate(term, [target_tensor.conjugate(), target_tensor])
+        self._A_tn = differentiate(term, [target_tensor.conjugate(), target_tensor])
         self._A_tn.find_contraction_path(verbose, mem_limit)
         tc_subs = term.tensor_subscripts(target_tensor.conjugate())
         t_subs = term.tensor_subscripts(target_tensor)
@@ -176,7 +176,7 @@ class VectorGenerator(object):
         self._trans_axes = []
         for coeff, term in terms:
             if (not term.has(target_tensor)) and term.has(target_tensor.conjugate()):
-                diff = differenciate(term, target_tensor.conjugate())
+                diff = differentiate(term, target_tensor.conjugate())
                 diff.find_contraction_path()
                 t_subs = term.tensor_subscripts(target_tensor.conjugate())
                 trans_axes = _trans_axes(diff.external_subscripts, t_subs)
