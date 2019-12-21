@@ -52,6 +52,7 @@ parser.add_argument('--nesterov', default=False, action='store_true', help='nest
 parser.add_argument('--alpha', default=1e-8, type=float, help='regularization parameter')
 parser.add_argument('--scut', default=1e-4, type=float, help='Cutoff value for singular values')
 parser.add_argument('--vertex', default=False, action='store_true', help='Vertex or not')
+parser.add_argument('--restart', default=False, action='store_true', help='Restart')
 
 args = parser.parse_args()
 if os.path.isfile(args.path_input_file) is False:
@@ -73,13 +74,14 @@ if rank == 0:
     print("Lambda = ", Lambda)
     print("beta = ", beta)
     print("nesterov = ", args.nesterov)
+    print("restart = ", args.restart)
 
 # n1, n2, n3, n4 convention
 freqs = []
 for i in range(n_freqs):
     freqs.append(from_PH_convention(freqs_PH[i,:]))
 
-basis = irbasis.load('F', Lambda)
+#basis = irbasis.load('F', Lambda)
 
 # Find active orbital components
 tmp = numpy.sqrt(numpy.sum(numpy.abs(G2iwn)**2, axis=-1)).ravel()
@@ -106,22 +108,24 @@ if rank == 0:
     print("Nl = ", Nl)
 
 # Regression
-def perform_fit(tensors_A, y, Ds, cutoff=1e-5):
+def perform_fit(tensors_A, y, D, xtensors0):
     coeffs_D = []
     Nw, Nr, linear_dim = tensors_A[0].shape
     y = y.reshape((-1, num_o))
 
-    for i, D in enumerate(Ds):
-        if rank == 0:
-            print("D ", D)
-        print("Calling fit for D={}...".format(D))
-        xs = fit(y[:, orb_idx], tensors_A, D, args.niter, rtol=1e-8, alpha=args.alpha, verbose=1, random_init=True, comm=comm, seed=args.seed, nesterov=args.nesterov)
-        x_orb_full = numpy.zeros((D, num_o), dtype=complex)
-        x_orb_full[:, orb_idx] = xs[-1]
-        xs[-1] = x_orb_full
-        coeffs_D.append(xs)
-    
-    return coeffs_D
+    print("Calling fit for D={}...".format(D))
+    if xtensors0 is None:
+        x0 = None
+        random_init = True
+    else:
+        x0 = copy.deepcopy(xtensors0)
+        x0[-1] = x0[-1][:, orb_idx]
+        random_init = False
+    xs = fit(y[:, orb_idx], tensors_A, D, args.niter, rtol=1e-8, alpha=args.alpha, verbose=1, random_init=random_init, comm=comm, seed=args.seed, nesterov=args.nesterov, x0=x0)
+    x_orb_full = numpy.zeros((D, num_o), dtype=complex)
+    x_orb_full[:, orb_idx] = xs[-1]
+    xs[-1] = x_orb_full
+    return xs
 
 def construct_prj(sp):
     n_sp = len(sp)
@@ -133,14 +137,22 @@ def construct_prj(sp):
 
 prj = construct_prj(sp_local)
 
-Ds = [args.D]
+D = args.D
+xtensors0 = None
+if args.restart:
+    if is_master_node:
+        print("Reading ", args.path_output_file)
+    xtensors0 = []
+    with h5py.File(args.path_output_file, 'r') as hf:
+        for i in range(5):
+            xtensors0.append(hf['/D'+ str(D) + '/x' + str(i)][()])
+
 y = G2iwn_local.transpose((1,0))
-coeffs_D = perform_fit(prj, y, Ds)
+xtensors = perform_fit(prj, y, D, xtensors0)
 
 if is_master_node:
     with h5py.File(args.path_output_file, 'a') as hf:
-        for i, D in enumerate(Ds):
-            if '/D'+ str(D) in hf:
-                del hf['/D'+ str(D)]
-            for i, x in enumerate(coeffs_D[i]):
-                hf['/D'+ str(D) + '/x' + str(i)] = x
+        if '/D'+ str(D) in hf:
+            del hf['/D'+ str(D)]
+        for i, x in enumerate(xtensors):
+            hf['/D'+ str(D) + '/x' + str(i)] = x
