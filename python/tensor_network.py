@@ -4,16 +4,15 @@ import numpy
 from . import opt_einsum as oe
 import time
 
-def _to_alphabet(i):
+_CHAR_LIST = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+
+def _to_letter(i):
     """
-    Convert an integer (from 0 to 51) to an _to_alphabet
+    Convert an integer (from 0 to 51) to a letter
     """
-    if i >= 0 and i <= 25:
-        return chr(97 + i)
-    elif i >= 26 and i <= 51:
-        return chr(65 + i - 26)
-    else:
-        raise RuntimeError("Cannot convert {} to alphabet!".format(i))
+    if i < 0 or i > 51:
+        raise ValueError("i must be integer between 0 and 51")
+    return _CHAR_LIST[i]
 
 
 class Tensor(object):
@@ -134,7 +133,7 @@ class TensorNetwork(object):
         # Mapping from subscripts to alphabets
         self._map_subscript_char = {}
         for idx, subscript in enumerate(self._unique_subscripts):
-            self._map_subscript_char[subscript] = _to_alphabet(idx)
+            self._map_subscript_char[subscript] = _to_letter(idx)
 
         # Create str ver. of subscripts
         f = lambda x : self._map_subscript_char[x]
@@ -380,10 +379,10 @@ def _unique_order_preserved(x):
 
 def from_int_to_char_subscripts(subscripts):
     unique_subscripts = _unique_order_preserved(sum([list(t) for t in subscripts], []))
-    mapping = {unique_subscripts[i] : _to_alphabet(i) for i in range(len(unique_subscripts))}
+    mapping = {unique_subscripts[i] : _to_letter(i) for i in range(len(unique_subscripts))}
     return [list(map(lambda x: mapping[x], s)) for s in subscripts]
 
-def differenciate(tensor_network, tensors, external_subscripts=None):
+def differentiate(tensor_network, tensors, external_subscripts=None):
     """
     Differenciate a tensor network w.r.t tensor(s).
 
