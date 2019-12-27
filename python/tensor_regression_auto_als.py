@@ -31,7 +31,6 @@ def predict(prj, x_tensors):
     #print(t2-t1, t3-t2, t4-t3)
     return tmp_wo
 
-
 def fit(y, prj, D, nite,  rtol = 1e-3, verbose=0, random_init=True, x0=None, alpha=1e-8, comm=None, seed=1, nesterov=True):
     """
     Alternating least squares with L2 regularization
@@ -45,7 +44,7 @@ def fit(y, prj, D, nite,  rtol = 1e-3, verbose=0, random_init=True, x0=None, alp
         When MPI is used, sampling frequencies are distributed to MPI processes.
 
     prj:
-        Tensor network represenation of coefficient matrix
+        Tensor network representation of coefficient matrix
 
     nite: int
         Number of max iterations.
@@ -66,9 +65,36 @@ def fit(y, prj, D, nite,  rtol = 1e-3, verbose=0, random_init=True, x0=None, alp
         Use Nesterov's acceleration
 
 
-
     Returns
     -------
+    x_tensors: list of ndarray
+        CPD tensors
+    """
+
+    num_w, num_rep, linear_dim = prj[0].shape
+    num_o = y.shape[1]
+
+    assert y.shape[0] == num_w
+    assert y.shape[1] == num_o
+
+    Y_tn = TensorNetwork([Tensor('Y', (num_w, num_o))], [(0,1)], external_subscripts={0,1})
+
+    return fit_impl(Y_tn, {'Y': y}, prj, D, nite,  rtol, verbose, random_init, x0, alpha, comm, seed, nesterov)
+
+
+def fit_impl(Y_tn, Y_tensors, prj, D, nite,  rtol = 1e-3, verbose=0, random_init=True, x0=None, alpha=1e-8, comm=None, seed=1, nesterov=True):
+    """
+
+    Parameters
+    ----------
+    Y_tn: TensorNetwork
+        Tensor network to be fitted.
+        The shape is (num_w, num_o) [num_w = number of frequencies, num_o = num of spin-orbital components].
+
+    Y_tensors: dict
+        Actual data of Y
+
+    The others are the same as those of fit().
 
     """
 
@@ -84,10 +110,10 @@ def fit(y, prj, D, nite,  rtol = 1e-3, verbose=0, random_init=True, x0=None, alp
 
     freq_dim = len(prj)
     num_w, num_rep, linear_dim = prj[0].shape
-    num_o = y.shape[1]
+    num_o = Y_tn.shape[1]
 
-    assert y.shape[0] == num_w
-    assert y.shape[1] == num_o
+    assert Y_tn.shape[0] == num_w
+    assert Y_tn.shape[1] == num_o
 
     def _init_random_array(*shape):
         return numpy.random.rand(*shape) + 1J * numpy.random.rand(*shape)
@@ -95,8 +121,7 @@ def fit(y, prj, D, nite,  rtol = 1e-3, verbose=0, random_init=True, x0=None, alp
     tensors_value = {}
 
     # Tensor network to be fitted
-    Y_tn = TensorNetwork([Tensor('Y', (num_w, num_o))], [(0,1)], external_subscripts={0,1})
-    tensors_value['Y'] = y
+    tensors_value.update(Y_tensors)
 
     ## Tensor network to fit by
     # Fitting parameters for representations

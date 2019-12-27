@@ -89,7 +89,7 @@ class FourPointPHView(object):
 
     def sparse_projector_to_matsubara(self, n1_n2_vec):
         """
-        Return a sparse projector from IR to Matsubara frequencies
+        Return a sparse representation of projector from IR to Matsubara frequencies
         """
         # Find all one-particle frequencies appear and compute U_{nl} for them
         import sparse

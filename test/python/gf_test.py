@@ -11,6 +11,7 @@ class TestMethods(unittest.TestCase):
 
     def test_LocalGf2CP(self):
 
+        beta = 1.0
         Lambda = 10.0
         Nl = 10
         No = 3
@@ -18,7 +19,9 @@ class TestMethods(unittest.TestCase):
         tensors = [numpy.random.randn(D, 16)] + [numpy.random.randn(D, Nl)]*3 + [numpy.random.randn(D, No)]
 
         for vertex in [True, False]:
-            gf = LocalGf2CP(Lambda, Nl, No, D, tensors, vertex)
+            gf = LocalGf2CP(beta, Lambda, Nl, No, D, tensors, vertex)
+            assert gf.beta == beta
+            assert gf.wmax == Lambda/beta
             assert gf.tensors == tensors
             assert gf.Nl == Nl
             assert gf.vertex == vertex
@@ -26,7 +29,7 @@ class TestMethods(unittest.TestCase):
 
 
     def test_LocalGf2CP_io(self):
-
+        beta = 1.0
         Lambda = 10.0
         Nl = 10
         No = 3
@@ -34,13 +37,14 @@ class TestMethods(unittest.TestCase):
         tensors = [numpy.random.randn(D, 16)] + [numpy.random.randn(D, Nl)]*3 + [numpy.random.randn(D, No)]
 
         for vertex in [True, False]:
-            gf = LocalGf2CP(Lambda, Nl, No, D, tensors, vertex)
+            gf = LocalGf2CP(beta, Lambda, Nl, No, D, tensors, vertex)
             with h5py.File('tmp.h5', 'w') as f:
                 gf.save(f, '/somepath')
 
             with h5py.File('tmp.h5', 'r') as f:
                 gf_loaded = LocalGf2CP.load(f, '/somepath')
 
+                assert gf_loaded.beta == gf.beta
                 assert gf_loaded.Lambda == gf.Lambda
                 assert gf_loaded.vertex == gf.vertex
                 assert gf_loaded.Nl == gf.Nl

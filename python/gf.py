@@ -8,7 +8,7 @@ class LocalGf2CP(object):
     """
     Local Four-point object in CP form
     """
-    def __init__(self, Lambda, Nl, No, D, tensors, vertex):
+    def __init__(self, beta, Lambda, Nl, No, D, tensors, vertex):
         """
         Initialize a local Green's function object
 
@@ -27,7 +27,9 @@ class LocalGf2CP(object):
             Vertex or not
         """
 
+        self._beta = float(beta)
         self._Lambda = float(Lambda)
+        self._wmax = self._Lambda/self._beta
         self._D, self._Nl, self._No = D, Nl, No
         self._vertex = vertex
         self._ntensors = 5
@@ -58,6 +60,14 @@ class LocalGf2CP(object):
         return self._No
 
     @property
+    def beta(self):
+        return self._beta
+
+    @property
+    def wmax(self):
+        return self._wmax
+
+    @property
     def Lambda(self):
         return self._Lambda
 
@@ -80,6 +90,7 @@ class LocalGf2CP(object):
         if path in f:
             del f[path]
 
+        f[path + '/beta'] = self.beta
         f[path + '/Lambda'] = self.Lambda
         f[path + '/D'] = self.D
         f[path + '/Nl'] = self.Nl
@@ -104,11 +115,14 @@ class LocalGf2CP(object):
             A LocalGf2 object
         """
 
+        assert isinstance(path, str)
+
         tensors = [f[path + '/x' + str(i)][()] for i in range(5)]
+        beta =  f[path + '/beta'][()]
         Lambda =  f[path + '/Lambda'][()]
         vertex =  f[path + '/vertex'][()]
         Nl =  f[path + '/Nl'][()]
         No =  f[path + '/No'][()]
         D =  f[path + '/D'][()]
 
-        return LocalGf2CP(Lambda, Nl, No, D, tensors, vertex)
+        return LocalGf2CP(beta, Lambda, Nl, No, D, tensors, vertex)

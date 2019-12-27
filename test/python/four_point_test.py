@@ -92,15 +92,15 @@ class TestMethods(unittest.TestCase):
         # build the sampling frequency structure
         sp = b4pt.sampling_points_matsubara(whichl)
         n_sp = len(sp)
-        prj = numpy.array(b4pt.projector_to_matsubara_vec(sp))[:, :,  :, :]
-        prj_mat = prj[:, :, :, :].reshape((n_sp, 16 * Nl**3))
-        print(Nl, prj_mat.shape)
+        prj = b4pt.projector_to_matsubara_vec(sp)
+        prj_mat = numpy.einsum('nrL,nrM,nrN->nrLMN', *prj, optimize=True).reshape((n_sp, 16 * Nl**3))
         # Build the check frequency structure
         n1234_check = []
         niw = 100
         for i, j, k in product(range(-niw, niw, 10), repeat=3):
             n1234_check.append((i, j, k, - i - j - k - 2))
-        prj_check = numpy.array(b4pt.projector_to_matsubara_vec(n1234_check))[:, :, :, :]
+        prj_check = b4pt.projector_to_matsubara_vec(n1234_check)
+        prj_check = numpy.einsum('nrL,nrM,nrN->nrLMN', *prj_check, optimize=True)
 
         # Test No. 1, 2, 5, 6
         for r in [0, 1, 4, 5]:
@@ -112,6 +112,10 @@ class TestMethods(unittest.TestCase):
         
     def test_transformation_to_PH(self):
         self.assertEqual(to_PH_convention(from_PH_convention( (0,1,2) )),  (0,1,2))
+
+        n_points = 100
+        n_np_m = numpy.random.randint(-100, 100, size=(n_points, 3))
+        assert numpy.allclose(to_PH_convention(from_PH_convention(n_np_m)), n_np_m)
 
 
 if __name__ == '__main__':

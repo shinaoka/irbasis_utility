@@ -228,7 +228,7 @@ class Basis(object):
     """
     Basis for two-point Green's function in terms of tau and omega
     """
-    def __init__(self, b, beta, cutoff=1e-15):
+    def __init__(self, b, beta, cutoff=1e-15, Nl_max=None):
         check_type(b, [irbasis.basis, augmented_basis_b])
         check_type(beta, [float])
 
@@ -241,7 +241,8 @@ class Basis(object):
         self._scale2 = numpy.sqrt(1 / self._wmax)
         self._Unl_cache = {}
 
-        self._dim = numpy.sum([self._b.sl(l) / self._b.sl(0) > cutoff for l in range(self._b.dim())])
+        dim_cutoff = numpy.sum([self._b.sl(l) / self._b.sl(0) > cutoff for l in range(self._b.dim())])
+        self._dim = dim_cutoff if Nl_max is None else min(dim_cutoff, Nl_max)
 
         if self._stat == 'F':
             self._sl_const = numpy.sqrt(0.5 * beta * self._wmax)

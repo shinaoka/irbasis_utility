@@ -61,9 +61,7 @@ if rank == 0:
     print("restart = ", args.restart)
 
 # From PH to fermionic convention
-freqs = []
-for i in range(n_freqs):
-    freqs.append(from_PH_convention(freqs_PH[i,:]))
+freqs = from_PH_convention(freqs_PH)
 
 
 sizes, offsets = mpi_split(n_freqs, comm.size)
@@ -90,7 +88,7 @@ if args.restart:
     with h5py.File(args.path_output_file, 'r') as hf:
         gf = LocalGf2CP.load(hf, '/D'+str(D))
 else:
-    gf = LocalGf2CP(Lambda, Nl, num_o, D, None, args.vertex)
+    gf = LocalGf2CP(beta, Lambda, Nl, num_o, D, None, args.vertex)
 
 # Regression
 transform.fit_LocalGf2CP(gf, G2iwn_local.transpose(), args.niter, not args.restart, args.rtol, args.alpha, 1, args.seed)
