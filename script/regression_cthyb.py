@@ -11,15 +11,13 @@ import copy
 import argparse
 import irbasis
 import matplotlib.pylab as plt
-from irbasis_util.four_point_ph_view import *
-from irbasis_util.internal import *
-from irbasis_util.regression import *
+from irbasis_util.four_point_ph_view import FourPointPHView
 
-from irbasis_util.tensor_regression import *
+#from irbasis_util.internal import *
+#from irbasis_util.regression import *
+
+from irbasis_util.tensor_regression_auto_als import fit, predict
 from mpi4py import MPI 
-
-
-enable_MPI() #for tensor_regression
 
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
@@ -50,6 +48,11 @@ parser.add_argument('--niter', default=20, type=int, help='Number of iterations'
 parser.add_argument('--D', default=1, type=int, help='Rank of decomposition')
 parser.add_argument('--Lambda', default=0, type=float, help='Lambda')
 parser.add_argument('--beta', default=0, type=float, help='beta')
+parser.add_argument('--nesterov', default=False, action='store_true', help='nesterov')
+parser.add_argument('--alpha', default=1e-8, type=float, help='regularization parameter')
+parser.add_argument('--scut', default=1e-4, type=float, help='Cutoff value for singular values')
+parser.add_argument('--vertex', default=False, action='store_true', help='Vertex or not')
+parser.add_argument('--restart', default=False, action='store_true', help='Restart')
 
 args = parser.parse_args()
 if os.path.isfile(args.path_input_file) is False:
@@ -67,7 +70,11 @@ with h5py.File(args.path_input_file, 'r') as hf:
     data = data[:,:,0] + 1J * data[:,:,1]
     num_o = data.shape[0]
 
-basis = irbasis.load('F', Lambda)
+if rank == 0:
+    print("Lambda = ", Lambda)
+    print("beta = ", beta)
+    print("nesterov = ", args.nesterov)
+    print("restart = ", args.restart)
 
 n_freqs = numpy.sum([freqs_PH_all[i,2]==boson_freq for i in range(freqs_PH_all.shape[0])])
 
@@ -96,7 +103,7 @@ for i in range(n_freqs):
 
 wmax = Lambda / beta
 
-phb = FourPointPHView(boson_freq, Lambda, beta, 1e-4, True)
+phb = FourPointPHView(boson_freq, Lambda, beta, args.scut, True)
 Nl = phb.Nl
 sp = [tuple(freqs_PH[i,:2]) for i in range(freqs_PH.shape[0])]
 
