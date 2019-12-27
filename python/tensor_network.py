@@ -76,7 +76,8 @@ class Tensor(object):
             return self.__dict__ == other.__dict__
         return False
 
-
+    def __hash__(self):
+        return hash(tuple(sorted(self.__dict__.items())))
 
 class TensorNetwork(object):
     def __init__(self, tensors, subscripts, external_subscripts=None):
@@ -150,6 +151,12 @@ class TensorNetwork(object):
                     shape[self._extern_subs_order[s]] = dim
         self._shape = tuple(shape)
 
+        self._sanity_check()
+
+    def _sanity_check(self):
+        if len(set(self._tensors)) < len(self._tensors):
+            raise RuntimeError("There are identical tensors!")
+
     def __str__(self):
         return '\n'.join([t.__str__() + ',subs=' + s.__str__() for t, s in zip(self._tensors, self._subscripts)])
 
@@ -190,9 +197,7 @@ class TensorNetwork(object):
         if mem_limit is None:
             mem_limit = 1E+18
         t1 = time.time()
-        #self._contraction_path, string_repr = numpy.einsum_path(self._str_sub, *dummy_arrays, optimize=('greedy', mem_limit))
         contraction_path, string_repr = oe.contract_path(self._str_sub, *dummy_arrays, optimize='dynamic-programming')
-        #contraction_path, string_repr = oe.contract_path(self._str_sub, *dummy_arrays, optimize='branch-2')
         self._contraction_path = ['einsum_path'] + contraction_path
         t2 = time.time()
         if verbose:

@@ -95,9 +95,9 @@ class TestMethods(unittest.TestCase):
         # sparse projector
         prj_freq, Uol, ovec = phb.sparse_projector_to_matsubara(sp)
 
-        prj_from_sparse = numpy.einsum('wrstOP,Ol,Pm->wrstlm', prj_freq.todense(), Uol, Uol)
-
-        numpy.testing.assert_allclose(prj_from_sparse, prj, atol=1e-10)
+        for imat in range(2):
+            M_from_sparse = numpy.einsum('wrstO,Ol->wrstl', prj_freq[imat].todense(), Uol)
+            numpy.testing.assert_allclose(M_from_sparse, prj_decomposed[imat,...], atol=1e-10)
 
     def test_sampling_points_matsubara(self):
         boson_freq = 10

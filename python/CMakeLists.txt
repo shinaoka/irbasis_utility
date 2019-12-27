@@ -2,6 +2,8 @@
 set(script_files __init__.py two_point_basis.py three_point.py four_point.py
 four_point_ph_view.py regression.py internal.py tensor_regression.py lsqr.py
 tensor_regression_mps.py tensor_network.py auto_als.py tensor_regression_auto_als.py
+gf.py
+solver.py
 opt_einsum/__init__.py
 opt_einsum/_version.py
 opt_einsum/blas.py
