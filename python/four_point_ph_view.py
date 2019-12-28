@@ -11,7 +11,7 @@ def _sign(s):
     return 1 if ((s % 2) == 0) else -1
 
 class FourPointPHView(object):
-    def __init__(self, boson_freq, Lambda, beta, cutoff = 1e-8, augmented=True):
+    def __init__(self, boson_freq, Lambda, beta, cutoff = 1e-8, augmented=True, vertex=False):
         if not isinstance(boson_freq, int):
             raise RuntimeError("boson_freq should be an integer")
 
