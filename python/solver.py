@@ -102,7 +102,7 @@ class FourPointBasisTransform:
         """
 
         if self._prj_vertex is None:
-            self._prj_vertex = self._basis_vertex.projector_to_matsubara_vec(self._sp_local_F, decomposed_form=True)
+            self._prj_vertex = self._basis_vertex.projector_to_matsubara_vec(self._sp_local_F)
             for imat in range(3):
                 self._prj_vertex[imat] = self._prj_vertex[imat].reshape((self._n_sp_local, 16, self._basis_vertex.Nl))
 
@@ -140,7 +140,10 @@ class FourPointBasisTransform:
         pass
 
     def multiply_LocalGf2CP_PH(self, g_left, g_right, niw_inner, D_new, nite, rtol, alpha):
+        assert self._prj_vertex is not None
+
         # Sampling points for multiplication
+        Nw_inner = 2*niw_inner
         nf_inner = numpy.arange(-niw_inner, niw_inner)
         sp_PH_left = numpy.empty((self._n_sp_local, 2*niw_inner, 3), dtype=int)
         sp_PH_right = numpy.empty((self._n_sp_local, 2*niw_inner, 3), dtype=int)
@@ -155,18 +158,19 @@ class FourPointBasisTransform:
         # Projectors
         basis_dict = {True: self.basis_vertex, False: self.basis_G2}
         print("Generating projectors for left object...")
-        prj_left = basis_dict[g_left.vertex].projector_to_matsubara_vec(sp_left).reshape((self._n_sp_local, 2*niw_inner, -1))
+        #prj_left = basis_dict[g_left.vertex].projector_to_matsubara_vec(sp_left).reshape((self._n_sp_local, 2*niw_inner, -1))
+        prj_left = basis_dict[g_left.vertex].projector_to_matsubara_vec(sp_left, reduced_memory=True)
         print("Generating projectors for right object...")
-        prj_right = basis_dict[g_left.vertex].projector_to_matsubara_vec(sp_right).reshape((self._n_sp_local, 2*niw_inner, -1))
+        #prj_right = basis_dict[g_left.vertex].projector_to_matsubara_vec(sp_right).reshape((self._n_sp_local, 2*niw_inner, -1))
+        prj_right = basis_dict[g_left.vertex].projector_to_matsubara_vec(sp_right, reduced_memory=True)
         vertex_result = g_left.vertex and g_right.vertex
         prj = {True: self._prj_vertex, False: self._prj_G2}[vertex_result]
         Nl_result = {True: self._basis_vertex.Nl, False: self._basis_G2.Nl}[vertex_result]
 
-
         assert g_left.No == g_right.No
 
         verbose = self._rank == 0
-        xtensors = _multiply_LocalGf2CP_PH_compress(g_left, g_right, prj, prj_left, prj_right,
+        xtensors = _multiply_LocalGf2CP_PH_compress(self._n_sp_local, Nw_inner, g_left, g_right, prj, prj_left, prj_right,
                                      D_new, nite, rtol, alpha, self._comm, seed=1, verbose=verbose)
 
         return LocalGf2CP(self.Lambda, Nl_result, g_left.No, D_new, xtensors, vertex_result)
@@ -183,15 +187,20 @@ class FourPointBasisTransform:
         gc.collect()
 
 
-def _multiply_LocalGf2CP_PH_compress(g_left, g_right, prj, prj_multiply_PH_L, prj_multiply_PH_R,
+def _multiply_LocalGf2CP_PH_compress(Nw, Nw_inner, g_left, g_right, prj, prj_multiply_PH_L, prj_multiply_PH_R,
                                      D_new, nite, rtol, alpha, comm, seed=1, verbose=False):
     """
     Compute the product of two tensors in PH channel
     """
 
-    y0, y1 = _multiply_LocalGf2CP_PH(g_left, g_right, prj_multiply_PH_L, prj_multiply_PH_R, verbose=verbose)
+    Nr = 16
+    for i in range(1,4):
+        prj_multiply_PH_L[i] = prj_multiply_PH_L[i].reshape((Nw, Nw_inner, Nr))
+        prj_multiply_PH_R[i] = prj_multiply_PH_R[i].reshape((Nw, Nw_inner, Nr))
 
-    Nw, _, _, _ = prj_multiply_PH_L[0].shape
+    y0, y1 = _multiply_LocalGf2CP_PH(Nw, Nw_inner, g_left, g_right, prj_multiply_PH_L, prj_multiply_PH_R)
+
+    Nw, _, _ = prj[0].shape
     No = g_left.tensors[-1].shape[1]
     D_L = g_left.D
     D_R = g_right.D
@@ -205,9 +214,26 @@ def _multiply_LocalGf2CP_PH_compress(g_left, g_right, prj, prj_multiply_PH_L, pr
         seed=seed, nesterov=True)
 
 
+def _contract_one_side(xr, U_xls, coords_trans, work, out):
+    """
+    Contract tensors for one side.
+    """
+    D, Nr = xr.shape
+    assert coords_trans.shape == (3, Nr)
+    _, N_1pfreq, _ =  U_xls.shape
 
-def _multiply_LocalGf2CP_PH(g_left, g_right, prj_multiply_PH_L, prj_multiply_PH_R,
-                            verbose=False):
+    assert work.shape == (Nr, D)
+    assert out.shape == (D,)
+
+    work[:,:] = xr.transpose()
+    for imat in range(3):
+        for r in range(Nr):
+            work[r, :] *= U_xls[imat, coords_trans[imat, r], :]
+    numpy.sum(work, axis=0, out=out)
+
+
+
+def _multiply_LocalGf2CP_PH(Nw, Nw_inner, g_left, g_right, prj_multiply_PH_L, prj_multiply_PH_R):
     """
     Compute the product of two tensors in PH channel
 
@@ -219,9 +245,17 @@ def _multiply_LocalGf2CP_PH(g_left, g_right, prj_multiply_PH_L, prj_multiply_PH_
         Two tensors for frequency and orbitals
     """
 
-    # Number of frequencies for outer/internal lines
-    Nw, Nw_inner, _, Nl_L = prj_multiply_PH_L[0].shape
-    _, _, _, Nl_R = prj_multiply_PH_R[0].shape
+    # Number of representations
+    Nr = 16
+
+    Nl_L, Nl_R = g_left.Nl, g_right.Nl
+
+    # Alias
+    Unl_L = prj_multiply_PH_L[0]
+    Unl_R = prj_multiply_PH_R[0]
+
+    N_1ptfreq_L = Unl_L.shape[0]
+    N_1ptfreq_R = Unl_R.shape[0]
 
     No = g_left.tensors[-1].shape[1]
     sqrt_No = int(numpy.sqrt(No))
@@ -234,52 +268,35 @@ def _multiply_LocalGf2CP_PH(g_left, g_right, prj_multiply_PH_L, prj_multiply_PH_
     D_L = g_left.D
     D_R = g_right.D
 
-    # Number of representations
-    Nr = 16
+    # Unl_L/R (3, N_1ptfreq, Nl)
+    UnD_L = numpy.empty((3, N_1ptfreq_L, D_L), dtype=numpy.complex)
+    UnD_R = numpy.empty((3, N_1ptfreq_R, D_R), dtype=numpy.complex)
+    for imat in range(3):
+        UnD_L[imat, :, :] = numpy.einsum('nl,Dl->nD', Unl_L, g_left.tensors[imat+1][:, :])
+        UnD_R[imat, :, :] = numpy.einsum('nl,Dl->nD', Unl_R, g_right.tensors[imat+1][:, :])
 
-    # Define tensor network
-    tensors = []
-    subs = []
-    tensor_values = {}
+    x0 = numpy.empty((Nw, D_L, D_R), dtype=numpy.complex)
+    wrk_L = numpy.empty((D_L,), dtype=numpy.complex)
+    wrk_R = numpy.empty((D_R,), dtype=numpy.complex)
+    wrk_L_2 = numpy.empty((Nr, D_L,), dtype=numpy.complex)
+    wrk_R_2 = numpy.empty((Nr, D_R,), dtype=numpy.complex)
 
-    subs_W_inner = 30
-    subs_W = 2
-    subs_r_L = 10
-    subs_r_R = 20
+    # Index conversion from 2pt frequency to 1pt frequency
+    # coords_trans_L, coords_trans_R: (3, Nw*Nw_inner, Nr) => (Nw, Nw_inner, 3, Nr)
+    coords_trans_L = numpy.array(prj_multiply_PH_L[1:]).reshape((3, Nw, Nw_inner, Nr)).transpose((1, 2, 0, 3))
+    coords_trans_R = numpy.array(prj_multiply_PH_R[1:]).reshape((3, Nw, Nw_inner, Nr)).transpose((1, 2, 0, 3))
 
-    for i in [1, 2, 3]:
-        tensors.append(Tensor('UL{}'.format(i), (Nw, Nw_inner, Nr, Nl_L)))
-        subs.append((subs_W, subs_W_inner, subs_r_R, i + 10))
-        tensor_values['UL{}'.format(i)] = prj_multiply_PH_L[i-1]
+    for i_outer in range(Nw):
+        x0[i_outer, :, :] = 0.0
+        for i_inner in range(Nw_inner):
+            _contract_one_side(g_left.tensors[0], UnD_L, coords_trans_L[i_outer,i_inner,:,:], wrk_L_2, out=wrk_L)
+            _contract_one_side(g_right.tensors[0], UnD_R, coords_trans_R[i_outer,i_inner,:,:], wrk_R_2, out=wrk_R)
+            x0[i_outer, :, :] += numpy.outer(wrk_L, wrk_R)
 
-        tensors.append(Tensor('UR{}'.format(i), (Nw, Nw_inner, Nr, Nl_R)))
-        subs.append((subs_W, subs_W_inner, subs_r_L, i + 20))
-        tensor_values['UR{}'.format(i)] = prj_multiply_PH_R[i-1]
+    x1 = numpy.einsum('Dpq, Eqr->DEpr', g_left.tensors[-1].reshape((D_L,sqrt_No,sqrt_No)),
+                      g_right.tensors[-1].reshape((D_R, sqrt_No, sqrt_No)), optimize=True).reshape((D_L*D_R, No))
 
-        tensors.append(Tensor('xL{}'.format(i), (D_L, Nl_L)))
-        subs.append((0, i + 10))
-        tensor_values['xL{}'.format(i)] = g_left.tensors[i]
-
-        tensors.append(Tensor('xR{}'.format(i), (D_R, Nl_R)))
-        subs.append((1, i + 20))
-        tensor_values['xR{}'.format(i)] = g_right.tensors[i]
-
-    tensors.append(Tensor('xL0', (D_L, Nr)))
-    subs.append((0, 10))
-    tensor_values['xL0'] = g_left.tensors[0]
-
-    tensors.append(Tensor('xR0', (D_R, Nr)))
-    subs.append((1, 20))
-    tensor_values['xR0'] = g_right.tensors[0]
-
-    tn = TensorNetwork(tensors, subs, (2, 0, 1))
-    tn.find_contraction_path(verbose=verbose)
-
-    # Evaluate tensor network
-    x0 = tn.evaluate(tensor_values).reshape((Nw, D_L * D_R))
-    x1 = numpy.einsum('Dpq, Eqr->DEpr', g_left.tensors[3].reshape((D_L,sqrt_No,sqrt_No)),
-                      g_right.tensors[3].reshape((D_R, sqrt_No, sqrt_No)), optimize=True).reshape((D_L*D_R, No))
-
+    x0 = x0.transpose((1,2,0)).reshape((D_L*D_R, Nw))
     return x0, x1
 
 

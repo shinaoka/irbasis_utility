@@ -7,16 +7,58 @@ from itertools import product, permutations
 from .internal import *
 from .two_point_basis import *
 
+from numba import njit, jit
+
 # FFF representations (#1-#4)
 idx_n1n2n3_FFF = list()
 idx_n1n2n3_FFF.append(numpy.array((0,1,2))) # (iw_1, i_w2, i_w3)
 idx_n1n2n3_FFF.append(numpy.array((0,1,3))) # (iw_1, i_w2, i_w4)
 idx_n1n2n3_FFF.append(numpy.array((0,2,3))) # (iw_1, i_w3, i_w4)
 idx_n1n2n3_FFF.append(numpy.array((1,2,3))) # (iw_2, i_w3, i_w4)
+idx_n1n2n3_FFF = numpy.array(idx_n1n2n3_FFF)
 
 # FBF representations (#5-#16)
-idx_n1n2n4_FBF = [numpy.array((p[0], p[1], p[3])) for p in permutations([0, 1, 2, 3]) if p[0] < p[3]]
+idx_n1n2n4_FBF = numpy.array([numpy.array((p[0], p[1], p[3])) for p in permutations([0, 1, 2, 3]) if p[0] < p[3]])
 
+@njit
+def _construct_coords(n1_n2_n3_n4_vec, o_fb):
+    """
+    Construct conversion from 2pt frequencies to 1pt frequencies
+    """
+    nw = n1_n2_n3_n4_vec.shape[0]
+
+    min_o = numpy.amin(o_fb)
+    max_o = numpy.amax(o_fb)
+
+    num_o_dense = max_o - min_o + 1
+    map_o = numpy.empty(num_o_dense, dtype=numpy.int64)
+    map_o[:] = -100000000
+    for i in range(len(o_fb)):
+        map_o[o_fb[i]-min_o] = i
+
+    coords = numpy.empty((3, nw, 16, 3), dtype=numpy.int64)
+    for i in range(nw):
+        nvec = n1_n2_n3_n4_vec[i, :]
+
+        # FFF representations
+        for r in range(4):
+            three_ferminonic_freqs = nvec[idx_n1n2n3_FFF[r]]
+            for imat in range(3):
+                coords[imat, i, r, 0] = i
+                coords[imat, i, r, 1] = r
+                coords[imat, i, r, 2] = map_o[2*three_ferminonic_freqs[imat]+1 - min_o]
+
+        # FBF representations
+        for r in range(12):
+            n1_p, n2_p, n4_p = nvec[idx_n1n2n4_FBF[r]]
+            coords[:, i, r + 4, 0] = i
+            coords[:, i, r + 4, 1] = r + 4
+
+            coords[0, i, r + 4, 2] = map_o[2*n1_p+1 - min_o] # F
+            coords[1, i, r + 4, 2] = map_o[2*(n1_p + n2_p + 1) - min_o] # B
+            coords[2, i, r + 4, 2] = map_o[2*(-n4_p - 1)+1 - min_o]  # F
+
+    return coords
 
 class FourPoint(object):
     def __init__(self, Lambda, beta, cutoff=1e-8, augmented=True, vertex=False, ortho=False, Nl_max=None):
@@ -74,34 +116,53 @@ class FourPoint(object):
             return numpy.einsum('ri,rj,rk->rijk', svec1, svec2, svec3)
 
 
-    def projector_to_matsubara_vec(self, n1_n2_n3_n4_vec, decomposed_form=True):
+    def projector_to_matsubara_vec(self, n1_n2_n3_n4_vec, reduced_memory=False, decomposed_form=True):
         """
 
         Return a sparse representation of projector from IR to Matsubara frequencies
 
         :param n1_n2_n3_n4_vec: list of tuples or 2D ndarray of shape (Nw, 3)
             Sampling points in fermionic convention
-        :return: a list of three ndarray of shape (Nw, 16, Nl)
-
+        :return: a list of three ndarrays of shape (Nw, 16, Nl) [reduced_memory=False] or
+            a list of four ndarrays of shapes of (Nf, Nl), (3, Nw, 16).
         """
-        import sparse
 
         assert decomposed_form
 
         n1_n2_n3_n4_vec = numpy.asarray(n1_n2_n3_n4_vec)
+        nw = n1_n2_n3_n4_vec.shape[0]
+
+        Unl_fb, coords = self.projector_to_matsubara_decoupled(n1_n2_n3_n4_vec)
+
+        if reduced_memory:
+            return [Unl_fb] + [coords[imat][:, :, -1] for imat in range(3)]
+        else:
+            import sparse
+            num_o = Unl_fb.shape[0]
+            r = []
+            for imat in range(3):
+                coords_mat = coords[imat,:,:].reshape((nw*16, 3)).transpose()
+                coo = sparse.COO(coords_mat, numpy.ones(nw*16, dtype=int), shape=(nw, 16, num_o))
+                M = coo.reshape((nw*16, num_o)).to_scipy_sparse().dot(Unl_fb)
+                r.append(M.reshape((nw, 16, self._Nl)))
+            return r
+
+    def projector_to_matsubara_decoupled(self, n1_n2_n3_n4_vec):
+        n1_n2_n3_n4_vec = numpy.asarray(n1_n2_n3_n4_vec)
+
+        assert numpy.amax(n1_n2_n3_n4_vec) <= numpy.iinfo(numpy.int64).max
+        assert numpy.amin(n1_n2_n3_n4_vec) >= numpy.iinfo(numpy.int64).min
 
         nw = n1_n2_n3_n4_vec.shape[0]
 
         # All unique fermionic frequencies for the one-particle basis
-        n_f = numpy.unique(numpy.hstack((n1_n2_n3_n4_vec, -n1_n2_n3_n4_vec-1)))
-        o_f = 2*n_f + 1
+        n_f = numpy.unique(numpy.hstack((n1_n2_n3_n4_vec, -n1_n2_n3_n4_vec - 1)))
 
         # All unique bosonic frequencies for the one-particle basis
-        n_b = numpy.empty((nw, 16), dtype=int)
-        for i in range(nw):
-            for j, (n, np) in enumerate(product(n1_n2_n3_n4_vec[i,:], repeat=2)):
-                n_b[i,j] = n + np + 1
+        n_b = n1_n2_n3_n4_vec[:, :, None] + n1_n2_n3_n4_vec[:, None, :] + 1
         n_b = numpy.unique(n_b)
+
+        o_f = 2*n_f + 1
         o_b = 2*n_b
 
         # Precompute values of one-particle basis functions
@@ -110,40 +171,10 @@ class FourPoint(object):
 
         Unl_fb = numpy.vstack((Unl_f, Unl_b))
         o_fb = numpy.hstack((o_f, o_b))
-        dict_o_fb = {o: pos for pos, o in enumerate(o_fb)}
-        num_o = len(o_fb)
 
-        # Find the position of a given fermionic frequency
-        find_f = lambda nf: dict_o_fb[2*nf+1]
+        coords = _construct_coords(n1_n2_n3_n4_vec, o_fb)
 
-        # Find the position of a given bosonic frequency
-        find_b = lambda nb: dict_o_fb[2*nb]
-
-        coords = [numpy.empty((nw, 16, 3), dtype=int), numpy.empty((nw, 16, 3), dtype=int), numpy.empty((nw, 16, 3), dtype=int)]
-        for i in range(nw):
-            nvec = n1_n2_n3_n4_vec[i, :]
-
-            # FFF representations
-            for r in range(4):
-                three_ferminonic_freqs = nvec[idx_n1n2n3_FFF[r]]
-                for imat in range(3):
-                    coords[imat][i, r] = (i, r, find_f(three_ferminonic_freqs[imat]))
-
-            # FBF representations
-            for r in range(12):
-                n1_p, n2_p, n4_p = nvec[idx_n1n2n4_FBF[r]]
-                coords[0][i, r + 4] = (i, r+4, find_f(n1_p)) # F
-                coords[1][i, r + 4] = (i, r+4, find_b(n1_p + n2_p + 1)) # B
-                coords[2][i, r + 4] = (i, r+4, find_f(-n4_p - 1)) # F
-
-        r = []
-        for imat in range(3):
-            coords[imat] = coords[imat].reshape((nw*16, 3)).transpose()
-            coo = sparse.COO(coords[imat], numpy.ones(nw*16, dtype=int), shape=(nw, 16, num_o))
-            M = coo.reshape((nw*16, num_o)).to_scipy_sparse().dot(Unl_fb)
-            r.append(M.reshape((nw, 16, self._Nl)))
-
-        return r
+        return Unl_fb, coords
 
     def projector_to_matsubara(self, n1, n2, n3, n4, decomposed_form = False):
         """
