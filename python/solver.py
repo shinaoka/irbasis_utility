@@ -1,5 +1,7 @@
 from __future__ import print_function
 
+from numba import njit
+
 from .four_point import from_PH_convention, to_PH_convention, FourPoint
 #from .tensor_regression_auto_als import fit, predict
 #from .auto_als import AutoALS
@@ -170,7 +172,7 @@ class FourPointBasisTransform:
         assert g_left.No == g_right.No
 
         verbose = self._rank == 0
-        xtensors = _multiply_LocalGf2CP_PH_compress(self._n_sp_local, Nw_inner, g_left, g_right, prj, prj_left, prj_right,
+        xtensors = _multiply_LocalGf2CP_PH(self._n_sp_local, Nw_inner, g_left, g_right, prj, prj_left, prj_right,
                                      D_new, nite, rtol, alpha, self._comm, seed=1, verbose=verbose)
 
         return LocalGf2CP(self.Lambda, Nl_result, g_left.No, D_new, xtensors, vertex_result)
@@ -187,7 +189,7 @@ class FourPointBasisTransform:
         gc.collect()
 
 
-def _multiply_LocalGf2CP_PH_compress(Nw, Nw_inner, g_left, g_right, prj, prj_multiply_PH_L, prj_multiply_PH_R,
+def _multiply_LocalGf2CP_PH(Nw, Nw_inner, g_left, g_right, prj, prj_multiply_PH_L, prj_multiply_PH_R,
                                      D_new, nite, rtol, alpha, comm, seed=1, verbose=False):
     """
     Compute the product of two tensors in PH channel
@@ -198,7 +200,7 @@ def _multiply_LocalGf2CP_PH_compress(Nw, Nw_inner, g_left, g_right, prj, prj_mul
         prj_multiply_PH_L[i] = prj_multiply_PH_L[i].reshape((Nw, Nw_inner, Nr))
         prj_multiply_PH_R[i] = prj_multiply_PH_R[i].reshape((Nw, Nw_inner, Nr))
 
-    y0, y1 = _multiply_LocalGf2CP_PH(Nw, Nw_inner, g_left, g_right, prj_multiply_PH_L, prj_multiply_PH_R)
+    y0, y1 = _innersum_LocalGf2CP_PH(Nw, Nw_inner, g_left, g_right, prj_multiply_PH_L, prj_multiply_PH_R)
 
     Nw, _, _ = prj[0].shape
     No = g_left.tensors[-1].shape[1]
@@ -213,7 +215,7 @@ def _multiply_LocalGf2CP_PH_compress(Nw, Nw_inner, g_left, g_right, prj, prj_mul
     return fit_impl(Y_tn, tensor_values, prj, D_new, nite, rtol=rtol, verbose=0, random_init=True, x0=None, alpha=alpha, comm=comm,
         seed=seed, nesterov=True)
 
-
+@njit
 def _contract_one_side(xr, U_xls, coords_trans, work, out):
     """
     Contract tensors for one side.
@@ -229,26 +231,45 @@ def _contract_one_side(xr, U_xls, coords_trans, work, out):
     for imat in range(3):
         for r in range(Nr):
             work[r, :] *= U_xls[imat, coords_trans[imat, r], :]
-    numpy.sum(work, axis=0, out=out)
+    out[:] = numpy.sum(work, axis=0)
 
 
 
-def _multiply_LocalGf2CP_PH(Nw, Nw_inner, g_left, g_right, prj_multiply_PH_L, prj_multiply_PH_R):
+def _innersum_LocalGf2CP_PH(Nw, Nw_inner, g_left, g_right, prj_multiply_PH_L, prj_multiply_PH_R):
     """
     Compute the product of two tensors in PH channel
-
-    :param g_left:
-    :param g_right:
-    :param prj_multiply_PH:
-    :param verbose: bool
-    :return: tuple of two ndarrays
-        Two tensors for frequency and orbitals
     """
 
     # Number of representations
     Nr = 16
 
-    Nl_L, Nl_R = g_left.Nl, g_right.Nl
+    # Bond dimensions
+    D_L = g_left.D
+    D_R = g_right.D
+
+    # Frequency part
+    x0 =_innersum_freq_PH(Nw, Nw_inner, g_left.tensors[0:4], g_right.tensors[0:4], prj_multiply_PH_L, prj_multiply_PH_R)
+
+    # Spin orbital part
+    No = g_left.tensors[-1].shape[1]
+    sqrt_No = int(numpy.sqrt(No))
+    assert sqrt_No**2 == No
+    x1 = numpy.einsum('Dpq, Eqr->DEpr', g_left.tensors[-1].reshape((D_L,sqrt_No,sqrt_No)),
+                      g_right.tensors[-1].reshape((D_R, sqrt_No, sqrt_No)), optimize=True).reshape((D_L*D_R, No))
+
+    return x0, x1
+
+
+def _innersum_freq_PH(Nw, Nw_inner, xfreqs_L, xfreqs_R, prj_multiply_PH_L, prj_multiply_PH_R):
+    """
+    Perform frequency summation for the internal line in PH channel
+    """
+
+    # Number of representations
+    Nr = 16
+
+    D_L, Nl_L = xfreqs_L[1].shape
+    D_R, Nl_R = xfreqs_R[1].shape
 
     # Alias
     Unl_L = prj_multiply_PH_L[0]
@@ -257,23 +278,12 @@ def _multiply_LocalGf2CP_PH(Nw, Nw_inner, g_left, g_right, prj_multiply_PH_L, pr
     N_1ptfreq_L = Unl_L.shape[0]
     N_1ptfreq_R = Unl_R.shape[0]
 
-    No = g_left.tensors[-1].shape[1]
-    sqrt_No = int(numpy.sqrt(No))
-    assert sqrt_No**2 == No
-
-    assert Nl_L == g_left.Nl
-    assert Nl_R == g_right.Nl
-
-    # Bond dimensions
-    D_L = g_left.D
-    D_R = g_right.D
-
     # Unl_L/R (3, N_1ptfreq, Nl)
     UnD_L = numpy.empty((3, N_1ptfreq_L, D_L), dtype=numpy.complex)
     UnD_R = numpy.empty((3, N_1ptfreq_R, D_R), dtype=numpy.complex)
     for imat in range(3):
-        UnD_L[imat, :, :] = numpy.einsum('nl,Dl->nD', Unl_L, g_left.tensors[imat+1][:, :])
-        UnD_R[imat, :, :] = numpy.einsum('nl,Dl->nD', Unl_R, g_right.tensors[imat+1][:, :])
+        UnD_L[imat, :, :] = numpy.einsum('nl,Dl->nD', Unl_L, xfreqs_L[imat + 1][:, :])
+        UnD_R[imat, :, :] = numpy.einsum('nl,Dl->nD', Unl_R, xfreqs_R[imat + 1][:, :])
 
     x0 = numpy.empty((Nw, D_L, D_R), dtype=numpy.complex)
     wrk_L = numpy.empty((D_L,), dtype=numpy.complex)
@@ -289,17 +299,9 @@ def _multiply_LocalGf2CP_PH(Nw, Nw_inner, g_left, g_right, prj_multiply_PH_L, pr
     for i_outer in range(Nw):
         x0[i_outer, :, :] = 0.0
         for i_inner in range(Nw_inner):
-            _contract_one_side(g_left.tensors[0], UnD_L, coords_trans_L[i_outer,i_inner,:,:], wrk_L_2, out=wrk_L)
-            _contract_one_side(g_right.tensors[0], UnD_R, coords_trans_R[i_outer,i_inner,:,:], wrk_R_2, out=wrk_R)
+            _contract_one_side(xfreqs_L[0], UnD_L, coords_trans_L[i_outer, i_inner, :, :], wrk_L_2, out=wrk_L)
+            _contract_one_side(xfreqs_R[0], UnD_R, coords_trans_R[i_outer, i_inner, :, :], wrk_R_2, out=wrk_R)
             x0[i_outer, :, :] += numpy.outer(wrk_L, wrk_R)
 
-    x1 = numpy.einsum('Dpq, Eqr->DEpr', g_left.tensors[-1].reshape((D_L,sqrt_No,sqrt_No)),
-                      g_right.tensors[-1].reshape((D_R, sqrt_No, sqrt_No)), optimize=True).reshape((D_L*D_R, No))
-
-    x0 = x0.transpose((1,2,0)).reshape((D_L*D_R, Nw))
-    return x0, x1
-
-
-
-
+    return x0.transpose((1, 2, 0)).reshape((D_L * D_R, Nw))
 
