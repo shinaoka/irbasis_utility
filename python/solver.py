@@ -160,13 +160,18 @@ class FourPointBasisTransform:
 
         # Projectors
         basis_dict = {True: self.basis_vertex, False: self.basis_G2}
-        print("Generating projectors for left object...")
+        if self._rank == 0:
+            print("Generating projectors for left object...")
         prj_left = basis_dict[g_left.vertex].projector_to_matsubara_vec(sp_left, reduced_memory=True)
-        print("Generating projectors for right object...")
+        if self._rank == 0:
+            print("Generating projectors for right object...")
         prj_right = basis_dict[g_left.vertex].projector_to_matsubara_vec(sp_right, reduced_memory=True)
         vertex_result = g_left.vertex and g_right.vertex
+        if self._rank == 0:
+            print("vertex_result: ", vertex_result)
         prj = {True: self._prj_vertex, False: self._prj_G2}[vertex_result]
         Nl_result = {True: self._basis_vertex.Nl, False: self._basis_G2.Nl}[vertex_result]
+
 
         assert g_left.No == g_right.No
 
@@ -200,9 +205,11 @@ def _multiply_LocalGf2CP_PH(Nw, num_w_inner, g_left, g_right, prj, prj_multiply_
     prj_multiply_PH_L = (prj_multiply_PH_L[0], prj_multiply_PH_L[1].reshape((3, Nw, num_w_inner, Nr)))
     prj_multiply_PH_R = (prj_multiply_PH_R[0], prj_multiply_PH_R[1].reshape((3, Nw, num_w_inner, Nr)))
 
-    print('Computing product of two objects...', end='')
+    if verbose:
+        print('Computing product of two objects...', end='')
     y0, y1 = _innersum_LocalGf2CP_PH(Nw, num_w_inner, g_left, g_right, prj_multiply_PH_L, prj_multiply_PH_R)
-    print('done!')
+    if verbose:
+        print('done!')
 
     Nw, _, _ = prj[0].shape
     No = g_left.tensors[-1].shape[1]
