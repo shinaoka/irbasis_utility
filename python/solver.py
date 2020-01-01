@@ -214,7 +214,7 @@ def _multiply_LocalGf2CP_PH(Nw, num_w_inner, g_left, g_right, prj, prj_multiply_
     subs = [(10, 0), (10, 1)]
     Y_tn = TensorNetwork(tensors, subs, external_subscripts={0, 1})
 
-    return fit_impl(Y_tn, tensor_values, prj, D_new, nite, rtol=rtol, verbose=0, random_init=True, x0=None, alpha=alpha, comm=comm,
+    return fit_impl(Y_tn, tensor_values, prj, D_new, nite, rtol=rtol, verbose=verbose, random_init=True, x0=None, alpha=alpha, comm=comm,
         seed=seed, nesterov=True)
 
 @njit
