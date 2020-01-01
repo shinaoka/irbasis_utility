@@ -3,6 +3,9 @@ from __future__ import print_function
 import h5py
 import numpy
 
+def _construct_random_LocalGf2CP(beta, Lambda, Nl, No, D, vertex):
+    tensors = [numpy.random.randn(D, 16)] + [numpy.random.randn(D, Nl)] * 3 + [numpy.random.randn(D, No)]
+    return LocalGf2CP(beta, Lambda, Nl, No, D, tensors, vertex)
 
 class LocalGf2CP(object):
     """

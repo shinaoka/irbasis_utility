@@ -36,7 +36,7 @@ def _construct_coords(n1_n2_n3_n4_vec, o_fb):
     for i in range(len(o_fb)):
         map_o[o_fb[i]-min_o] = i
 
-    coords = numpy.empty((3, nw, 16, 3), dtype=numpy.int64)
+    coords = numpy.empty((3, nw, 16), dtype=numpy.int64)
     for i in range(nw):
         nvec = n1_n2_n3_n4_vec[i, :]
 
@@ -44,21 +44,38 @@ def _construct_coords(n1_n2_n3_n4_vec, o_fb):
         for r in range(4):
             three_ferminonic_freqs = nvec[idx_n1n2n3_FFF[r]]
             for imat in range(3):
-                coords[imat, i, r, 0] = i
-                coords[imat, i, r, 1] = r
-                coords[imat, i, r, 2] = map_o[2*three_ferminonic_freqs[imat]+1 - min_o]
+                coords[imat, i, r] = map_o[2*three_ferminonic_freqs[imat]+1 - min_o]
 
         # FBF representations
         for r in range(12):
             n1_p, n2_p, n4_p = nvec[idx_n1n2n4_FBF[r]]
-            coords[:, i, r + 4, 0] = i
-            coords[:, i, r + 4, 1] = r + 4
-
-            coords[0, i, r + 4, 2] = map_o[2*n1_p+1 - min_o] # F
-            coords[1, i, r + 4, 2] = map_o[2*(n1_p + n2_p + 1) - min_o] # B
-            coords[2, i, r + 4, 2] = map_o[2*(-n4_p - 1)+1 - min_o]  # F
+            coords[0, i, r + 4] = map_o[2*n1_p+1 - min_o] # F
+            coords[1, i, r + 4] = map_o[2*(n1_p + n2_p + 1) - min_o] # B
+            coords[2, i, r + 4] = map_o[2*(-n4_p - 1)+1 - min_o]  # F
 
     return coords
+
+def convert_projector(Unl_fb, coords):
+    """
+    nw_1pt is the number of 1pt frequencies.
+
+    :param Unl_fb:  (nw_1pt, Nl)
+    :param coords: (3, nw, Nr)
+    :return:
+
+    """
+    num_o, Nl = Unl_fb.shape
+    _, nw, Nr = coords.shape
+    assert Nr == 16
+
+    result = []
+    for imat in range(3):
+        M = numpy.empty((nw, 16, Nl), dtype=complex)
+        for i in range(nw):
+            for r in range(Nr):
+                M[i, r, :] = Unl_fb[coords[imat, i, r], :]
+        result.append(M)
+    return result
 
 class FourPoint(object):
     def __init__(self, Lambda, beta, cutoff=1e-8, augmented=True, vertex=False, ortho=False, Nl_max=None):
@@ -124,7 +141,9 @@ class FourPoint(object):
         :param n1_n2_n3_n4_vec: list of tuples or 2D ndarray of shape (Nw, 3)
             Sampling points in fermionic convention
         :return: a list of three ndarrays of shape (Nw, 16, Nl) [reduced_memory=False] or
-            a list of four ndarrays of shapes of (Nf, Nl), (3, Nw, 16).
+            two ndarrays of shapes of (Nf, Nl) and (3, Nw, 16) [Unl_fb and coords]
+            In the latter case, the coefficient matrix for m-th IR argument (m=0, 1, 2) can be constructed as
+                 U[w, r, l] = Unl_fb[coords[m, w, r], l].
         """
 
         assert decomposed_form
@@ -135,19 +154,22 @@ class FourPoint(object):
         Unl_fb, coords = self.projector_to_matsubara_decoupled(n1_n2_n3_n4_vec)
 
         if reduced_memory:
-            return [Unl_fb] + [coords[imat][:, :, -1] for imat in range(3)]
+            return Unl_fb, coords
         else:
-            import sparse
-            num_o = Unl_fb.shape[0]
-            r = []
-            for imat in range(3):
-                coords_mat = coords[imat,:,:].reshape((nw*16, 3)).transpose()
-                coo = sparse.COO(coords_mat, numpy.ones(nw*16, dtype=int), shape=(nw, 16, num_o))
-                M = coo.reshape((nw*16, num_o)).to_scipy_sparse().dot(Unl_fb)
-                r.append(M.reshape((nw, 16, self._Nl)))
-            return r
+            return convert_projector(Unl_fb, coords)
 
     def projector_to_matsubara_decoupled(self, n1_n2_n3_n4_vec):
+        """
+        Compute projector from IR to Matsubara.
+
+        :param n1_n2_n3_n4_vec: array like
+             List of frequencies in fermionic convention
+        :return:  Unl_fb [(Nw_1pt, Nl)] and coords [(3, Nw, 16)]
+             Nw_pt is the number of 1pt frequencies.
+             coords denotes translation from 2pt frequencies to 1pt frequencies.
+             The coefficient matrix for m-th IR argument (m=0, 1, 2) can be constructed as
+                 U[w, r, l] = Unl_fb[coords[m, w, r], l].
+        """
         n1_n2_n3_n4_vec = numpy.asarray(n1_n2_n3_n4_vec)
 
         assert numpy.amax(n1_n2_n3_n4_vec) <= numpy.iinfo(numpy.int64).max

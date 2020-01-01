@@ -117,7 +117,6 @@ class TestMethods(unittest.TestCase):
         n_np_m = numpy.random.randint(-100, 100, size=(n_points, 3))
         assert numpy.allclose(to_PH_convention(from_PH_convention(n_np_m)), n_np_m)
 
-    """
     def test_projectors(self):
         Lambda = 10.0
         beta = 0.2
@@ -130,11 +129,12 @@ class TestMethods(unittest.TestCase):
         sp = from_PH_convention(n_np_m)
 
         prj = b4pt.projector_to_matsubara_vec(sp, reduced_memory=False)
-        prj2 = b4pt.projector_to_matsubara_vec(sp, reduced_memory=True)
-        
-        for imat in range(3):
-            prj2[0]
-    """
+        prj2 = convert_projector(*b4pt.projector_to_matsubara_vec(sp, reduced_memory=True))
+
+        assert len(prj) == len(prj2)
+        for p1, p2 in zip(prj, prj2):
+            assert numpy.allclose(p1, p2)
+
 
 
 if __name__ == '__main__':

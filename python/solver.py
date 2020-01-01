@@ -2,15 +2,12 @@ from __future__ import print_function
 
 from numba import njit
 
-from .four_point import from_PH_convention, to_PH_convention, FourPoint
-#from .tensor_regression_auto_als import fit, predict
-#from .auto_als import AutoALS
+from .four_point import from_PH_convention, to_PH_convention, FourPoint, convert_projector
 from .tensor_network import Tensor, TensorNetwork
 from .tensor_regression_auto_als import fit_impl, fit
 from .gf import LocalGf2CP
 
 import numpy
-import gc
 import copy
 
 def mpi_split(work_size, comm_size):
@@ -24,6 +21,7 @@ def mpi_split(work_size, comm_size):
     offsets[1:] = numpy.cumsum(sizes)[:-1]
 
     return sizes, offsets
+
 
 
 class FourPointBasisTransform:
@@ -85,6 +83,15 @@ class FourPointBasisTransform:
 
         self._rank = rank
 
+        self._generate_projectors_for_fit()
+
+    @property
+    def n_sp_local(self):
+        """
+        Number of sampling on this MPI node
+        """
+        return self._n_sp_local
+
     @property
     def Lambda(self):
         return self._Lambda
@@ -97,7 +104,7 @@ class FourPointBasisTransform:
     def basis_vertex(self):
         return self._basis_vertex
 
-    def generate_projectors_for_fit(self):
+    def _generate_projectors_for_fit(self):
         """
         Generate projectors for fitting.
         The results will be cached.
@@ -113,8 +120,6 @@ class FourPointBasisTransform:
 
     def fit_LocalGf2CP(self, g, data_sp, niter, random_init=True, rtol=1e-8, alpha=1e-8, verbose=1, seed=100):
         assert data_sp.shape[0] == self._n_sp_local
-
-        self.generate_projectors_for_fit()
 
         # Find non-zero orbital components
         tmp = numpy.sqrt(numpy.sum(numpy.abs(data_sp)**2, axis=0)).ravel()
@@ -141,29 +146,23 @@ class FourPointBasisTransform:
     def _get_prj_multiply_PH_R(self, vertex):
         pass
 
-    def multiply_LocalGf2CP_PH(self, g_left, g_right, niw_inner, D_new, nite, rtol, alpha):
+    def multiply_LocalGf2CP_PH(self, g_left, g_right, nw_max_inner, D_new, nite, rtol, alpha):
         assert self._prj_vertex is not None
 
         # Sampling points for multiplication
-        Nw_inner = 2*niw_inner
-        nf_inner = numpy.arange(-niw_inner, niw_inner)
-        sp_PH_left = numpy.empty((self._n_sp_local, 2*niw_inner, 3), dtype=int)
-        sp_PH_right = numpy.empty((self._n_sp_local, 2*niw_inner, 3), dtype=int)
-        sp_PH = to_PH_convention(self._sp_local_F)
-        for i, (nf1, nf2, nb) in enumerate(sp_PH):
-            for idx_inner, n in enumerate(nf_inner):
-                sp_PH_left[i, idx_inner, :] = (nf1, n, nb)
-                sp_PH_right[i, idx_inner, :] = (n, nf2, nb)
-        sp_left = from_PH_convention(sp_PH_left.reshape((-1, 3)))
-        sp_right = from_PH_convention(sp_PH_right.reshape((-1, 3)))
+        sp_left, sp_right = _construct_sampling_points_multiplication(range(-nw_max_inner, nw_max_inner), self._sp_local_F)
+
+        num_w_outer = self._n_sp_local
+        num_w_inner = 2*nw_max_inner
+
+        sp_left = sp_left.reshape((num_w_outer * num_w_inner, 4))
+        sp_right = sp_right.reshape((num_w_outer * num_w_inner, 4))
 
         # Projectors
         basis_dict = {True: self.basis_vertex, False: self.basis_G2}
         print("Generating projectors for left object...")
-        #prj_left = basis_dict[g_left.vertex].projector_to_matsubara_vec(sp_left).reshape((self._n_sp_local, 2*niw_inner, -1))
         prj_left = basis_dict[g_left.vertex].projector_to_matsubara_vec(sp_left, reduced_memory=True)
         print("Generating projectors for right object...")
-        #prj_right = basis_dict[g_left.vertex].projector_to_matsubara_vec(sp_right).reshape((self._n_sp_local, 2*niw_inner, -1))
         prj_right = basis_dict[g_left.vertex].projector_to_matsubara_vec(sp_right, reduced_memory=True)
         vertex_result = g_left.vertex and g_right.vertex
         prj = {True: self._prj_vertex, False: self._prj_G2}[vertex_result]
@@ -172,7 +171,7 @@ class FourPointBasisTransform:
         assert g_left.No == g_right.No
 
         verbose = self._rank == 0
-        xtensors = _multiply_LocalGf2CP_PH(self._n_sp_local, Nw_inner, g_left, g_right, prj, prj_left, prj_right,
+        xtensors = _multiply_LocalGf2CP_PH(self._n_sp_local, nw_max_inner, g_left, g_right, prj, prj_left, prj_right,
                                      D_new, nite, rtol, alpha, self._comm, seed=1, verbose=verbose)
 
         return LocalGf2CP(self.Lambda, Nl_result, g_left.No, D_new, xtensors, vertex_result)
@@ -185,8 +184,6 @@ class FourPointBasisTransform:
 
         for name in self._cache_attr:
             setattr(self, name, None)
-
-        gc.collect()
 
 
 def _multiply_LocalGf2CP_PH(Nw, Nw_inner, g_left, g_right, prj, prj_multiply_PH_L, prj_multiply_PH_R,
@@ -216,28 +213,72 @@ def _multiply_LocalGf2CP_PH(Nw, Nw_inner, g_left, g_right, prj, prj_multiply_PH_
         seed=seed, nesterov=True)
 
 @njit
-def _contract_one_side(xr, U_xls, coords_trans, work, out):
+def _contract(Nw, num_w_inner, xr_L, xr_R, U_xls_L, U_xls_R, coords_trans_L, coords_trans_R, work_L, work_R,
+              work_L2, work_R2, out):
     """
-    Contract tensors for one side.
+    Perform summation over inner frequencies
+    Nr = 16. D_L and D_R
+
+    :param Nw: int
+        Number of outer frequencies
+    :param num_w_inner: int
+        Number of inner frequencies
+    :param xr_L: (D_L, Nr)
+        Tensor for "r" of left object
+    :param xr_R: (D_R, Nr)
+        Tensor for "r" of right object
+    :param U_xls_L: (3, Nr, D_L)
+        Product of tensors for IR and projectors (left object)
+    :param U_xls_R: (3, Nr, D_R)
+        Product of tensors for IR and projectors (right object)
+    :param coords_trans_L: (Nw, 2*nw_max_inner, 3, Nr)
+        Translation from 2pt frequencies to 1pt frequencies
+    :param coords_trans_R: (Nw, 2*nw_max_inner, 3, Nr)
+        Translation from 2pt frequencies to 1pt frequencies
+    :param work_L: (Nr, D_L)
+        Work array
+    :param work_R: (Nr, D_R)
+        Work array
+    :param work_L2: (D_L,)
+        Work array
+    :param work_R2: (D_R,)
+        Work array
+    :param out: (Nw, D_L, D_R)
+        Output
     """
-    D, Nr = xr.shape
-    assert coords_trans.shape == (3, Nr)
-    _, N_1pfreq, _ =  U_xls.shape
+    D_L, Nr = xr_L.shape
+    D_R, Nr = xr_R.shape
+    assert coords_trans_L.shape == (Nw, num_w_inner, 3, Nr)
+    assert coords_trans_R.shape == (Nw, num_w_inner, 3, Nr)
+    _, N_1pfreq_L, _ =  U_xls_L.shape
+    _, N_1pfreq_R, _ =  U_xls_R.shape
 
-    assert work.shape == (Nr, D)
-    assert out.shape == (D,)
+    assert work_L.shape == (Nr, D_L)
+    assert work_R.shape == (Nr, D_R)
+    assert work_L2.shape == (D_L,)
+    assert work_R2.shape == (D_R,)
+    assert Nr == 16
 
-    work[:,:] = xr.transpose()
-    for imat in range(3):
-        for r in range(Nr):
-            work[r, :] *= U_xls[imat, coords_trans[imat, r], :]
-    out[:] = numpy.sum(work, axis=0)
+    assert out.shape == (Nw, D_L, D_R)
 
+    out[:, :, :] = 0.0
+    for i_outer in range(Nw):
+        for i_inner in range(num_w_inner):
+            work_L[:,:] = xr_L.transpose()
+            work_R[:,:] = xr_R.transpose()
+            for imat in range(3):
+                for r in range(Nr):
+                    work_L[r, :] *= U_xls_L[imat, coords_trans_L[i_outer, i_inner, imat, r], :]
+                    print(imat, r, work_R[r, :], U_xls_R[imat, coords_trans_R[i_outer, i_inner, imat, r], :])
+                    work_R[r, :] *= U_xls_R[imat, coords_trans_R[i_outer, i_inner, imat, r], :]
+            work_L2[:] = numpy.sum(work_L, axis=0)
+            work_R2[:] = numpy.sum(work_R, axis=0)
+            out[i_outer, :, :] += numpy.outer(work_L2, work_R2)
 
-
-def _innersum_LocalGf2CP_PH(Nw, Nw_inner, g_left, g_right, prj_multiply_PH_L, prj_multiply_PH_R):
+def _innersum_LocalGf2CP_PH(Nw, nw_max_inner, g_left, g_right, prj_multiply_PH_L, prj_multiply_PH_R):
     """
     Compute the product of two tensors in PH channel
+
     """
 
     # Number of representations
@@ -248,9 +289,9 @@ def _innersum_LocalGf2CP_PH(Nw, Nw_inner, g_left, g_right, prj_multiply_PH_L, pr
     D_R = g_right.D
 
     # Frequency part
-    x0 =_innersum_freq_PH(Nw, Nw_inner, g_left.tensors[0:4], g_right.tensors[0:4], prj_multiply_PH_L, prj_multiply_PH_R)
+    x0 =_innersum_freq_PH(Nw, 2*nw_max_inner, g_left.tensors[0:4], g_right.tensors[0:4], prj_multiply_PH_L, prj_multiply_PH_R)
 
-    # Spin orbital part
+    # Orbital part
     No = g_left.tensors[-1].shape[1]
     sqrt_No = int(numpy.sqrt(No))
     assert sqrt_No**2 == No
@@ -260,7 +301,7 @@ def _innersum_LocalGf2CP_PH(Nw, Nw_inner, g_left, g_right, prj_multiply_PH_L, pr
     return x0, x1
 
 
-def _innersum_freq_PH(Nw, Nw_inner, xfreqs_L, xfreqs_R, prj_multiply_PH_L, prj_multiply_PH_R):
+def _innersum_freq_PH(nw_outer, num_w_inner, xfreqs_L, xfreqs_R, prj_multiply_PH_L, prj_multiply_PH_R):
     """
     Perform frequency summation for the internal line in PH channel
     """
@@ -282,26 +323,113 @@ def _innersum_freq_PH(Nw, Nw_inner, xfreqs_L, xfreqs_R, prj_multiply_PH_L, prj_m
     UnD_L = numpy.empty((3, N_1ptfreq_L, D_L), dtype=numpy.complex)
     UnD_R = numpy.empty((3, N_1ptfreq_R, D_R), dtype=numpy.complex)
     for imat in range(3):
-        UnD_L[imat, :, :] = numpy.einsum('nl,Dl->nD', Unl_L, xfreqs_L[imat + 1][:, :])
-        UnD_R[imat, :, :] = numpy.einsum('nl,Dl->nD', Unl_R, xfreqs_R[imat + 1][:, :])
+        UnD_L[imat, :, :] = numpy.einsum('nl,Dl->nD', Unl_L, xfreqs_L[imat + 1], optimize=True)
+        UnD_R[imat, :, :] = numpy.einsum('nl,Dl->nD', Unl_R, xfreqs_R[imat + 1], optimize=True)
 
-    x0 = numpy.empty((Nw, D_L, D_R), dtype=numpy.complex)
-    wrk_L = numpy.empty((D_L,), dtype=numpy.complex)
-    wrk_R = numpy.empty((D_R,), dtype=numpy.complex)
-    wrk_L_2 = numpy.empty((Nr, D_L,), dtype=numpy.complex)
-    wrk_R_2 = numpy.empty((Nr, D_R,), dtype=numpy.complex)
+    x0 = numpy.empty((nw_outer, D_L, D_R), dtype=numpy.complex)
+    work_L = numpy.empty((Nr, D_L,), dtype=numpy.complex)
+    work_R = numpy.empty((Nr, D_R,), dtype=numpy.complex)
+    work_L2 = numpy.empty((D_L,), dtype=numpy.complex)
+    work_R2 = numpy.empty((D_R,), dtype=numpy.complex)
 
     # Index conversion from 2pt frequency to 1pt frequency
-    # coords_trans_L, coords_trans_R: (3, Nw*Nw_inner, Nr) => (Nw, Nw_inner, 3, Nr)
-    coords_trans_L = numpy.array(prj_multiply_PH_L[1:]).reshape((3, Nw, Nw_inner, Nr)).transpose((1, 2, 0, 3))
-    coords_trans_R = numpy.array(prj_multiply_PH_R[1:]).reshape((3, Nw, Nw_inner, Nr)).transpose((1, 2, 0, 3))
+    # coords_trans_L, coords_trans_R: (3, nw_outer*nw_max_inner, Nr) => (nw_outer, nw_max_inner, 3, Nr)
+    coords_trans_L = numpy.array(prj_multiply_PH_L[1]).reshape((3, nw_outer, num_w_inner, Nr)).transpose((1, 2, 0, 3))
+    coords_trans_R = numpy.array(prj_multiply_PH_R[1]).reshape((3, nw_outer, num_w_inner, Nr)).transpose((1, 2, 0, 3))
 
-    for i_outer in range(Nw):
-        x0[i_outer, :, :] = 0.0
-        for i_inner in range(Nw_inner):
-            _contract_one_side(xfreqs_L[0], UnD_L, coords_trans_L[i_outer, i_inner, :, :], wrk_L_2, out=wrk_L)
-            _contract_one_side(xfreqs_R[0], UnD_R, coords_trans_R[i_outer, i_inner, :, :], wrk_R_2, out=wrk_R)
-            x0[i_outer, :, :] += numpy.outer(wrk_L, wrk_R)
+    _contract(nw_outer, num_w_inner, xfreqs_L[0], xfreqs_R[0],
+              UnD_L, UnD_R,
+              coords_trans_L, coords_trans_R,
+              work_L, work_R,
+              work_L2, work_R2, x0)
 
-    return x0.transpose((1, 2, 0)).reshape((D_L * D_R, Nw))
+    return x0.transpose((1, 2, 0)).reshape((D_L * D_R, nw_outer))
+
+
+def _innersum_freq_PH_ref(nw_outer, num_w_inner, xfreqs_L, xfreqs_R, prj_multiply_PH_L, prj_multiply_PH_R):
+    """
+    Does the same job as _innersum_freq_PH, but requires much more memory.
+    """
+    # Number of representations
+    Nr = 16
+
+    # Bond dimensions
+    D_L, Nl_L = xfreqs_L[1].shape
+    D_R, Nl_R = xfreqs_R[1].shape
+
+    # Prepare projectors
+    prj_multiply_PH_L = convert_projector(*prj_multiply_PH_L)
+    prj_multiply_PH_R = convert_projector(*prj_multiply_PH_R)
+    for i in range(3):
+        prj_multiply_PH_L[i] = prj_multiply_PH_L[i].reshape((nw_outer, num_w_inner, Nr, Nl_L))
+        prj_multiply_PH_R[i] = prj_multiply_PH_R[i].reshape((nw_outer, num_w_inner, Nr, Nl_R))
+
+    # Define tensor network
+    tensors = []
+    subs = []
+    tensor_values = {}
+
+    subs_W_inner = 30
+    subs_W = 2
+    subs_r_L = 10
+    subs_r_R = 20
+
+    for i in [1, 2, 3]:
+        tensors.append(Tensor('UL{}'.format(i), (nw_outer, num_w_inner, Nr, Nl_L)))
+        subs.append((subs_W, subs_W_inner, subs_r_L, i + 10))
+        tensor_values['UL{}'.format(i)] = prj_multiply_PH_L[i-1]
+
+        tensors.append(Tensor('UR{}'.format(i), (nw_outer, num_w_inner, Nr, Nl_R)))
+        subs.append((subs_W, subs_W_inner, subs_r_R, i + 20))
+        tensor_values['UR{}'.format(i)] = prj_multiply_PH_R[i-1]
+
+        tensors.append(Tensor('xL{}'.format(i), (D_L, Nl_L)))
+        subs.append((0, i + 10))
+        tensor_values['xL{}'.format(i)] = xfreqs_L[i]
+
+        tensors.append(Tensor('xR{}'.format(i), (D_R, Nl_R)))
+        subs.append((1, i + 20))
+        tensor_values['xR{}'.format(i)] = xfreqs_R[i]
+
+    tensors.append(Tensor('xL0', (D_L, Nr)))
+    subs.append((0, subs_r_L))
+    tensor_values['xL0'] = xfreqs_L[0]
+
+    tensors.append(Tensor('xR0', (D_R, Nr)))
+    subs.append((1, subs_r_R))
+    tensor_values['xR0'] = xfreqs_R[0]
+
+    print(tensor_values['UR2'], tensor_values['UR2'].shape)
+    tn = TensorNetwork(tensors, subs, (2, 0, 1))
+    print(tn)
+    tn.find_contraction_path(verbose=True)
+
+    return tn.evaluate(tensor_values).reshape((nw_outer, D_L * D_R)).transpose()
+
+def _construct_sampling_points_multiplication(inner_w_range, sp_outer_F):
+    """
+
+    :param inner_w_range: range like
+       Define the range of the internal frequency index
+    :param sp_outer_F: array like
+       Sampling points in fermionic convention
+    :return:
+       Sampling points for multiplication (left & right objects)
+    """
+    # Sampling points for multiplication in fermionic convention
+
+    num_outer_w = sp_outer_F.shape[0]
+
+    num_inner_w = len(inner_w_range)
+    sp_PH_left = numpy.empty((num_outer_w, num_inner_w, 3), dtype=int)
+    sp_PH_right = numpy.empty((num_outer_w, num_inner_w, 3), dtype=int)
+    sp_PH = to_PH_convention(sp_outer_F)
+    for i, (nf1, nf2, nb) in enumerate(sp_PH):
+        for idx_inner, n in enumerate(inner_w_range):
+            sp_PH_left[i, idx_inner, :] = (nf1, n, nb)
+            sp_PH_right[i, idx_inner, :] = (n, nf2, nb)
+    sp_left = from_PH_convention(sp_PH_left.reshape((-1, 3))).reshape((num_outer_w, num_inner_w, 4))
+    sp_right = from_PH_convention(sp_PH_right.reshape((-1, 3))).reshape((num_outer_w, num_inner_w, 4))
+
+    return sp_left, sp_right
 
