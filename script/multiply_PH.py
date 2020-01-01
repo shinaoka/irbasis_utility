@@ -31,7 +31,7 @@ parser.add_argument('--niter', default=20, type=int, help='Number of iterations'
 parser.add_argument('--D', default=1, type=int, help='Rank of decomposition')
 parser.add_argument('--rtol', default=1e-8, type=float, help='rtol')
 parser.add_argument('--seed', default=1, type=int, help='seed')
-parser.add_argument('--ninner', default=100, type=int, help='Number of inner frequency points')
+parser.add_argument('--n_max_inner', default=100, type=int, help='Number of inner frequency points')
 parser.add_argument('--scut', default=1e-4, type=float, help='Cutoff value for singular values')
 parser.add_argument('--alpha', default=1e-8, type=float, help='regularization parameter')
 
@@ -63,9 +63,8 @@ if rank == 0:
     print("beta = ", beta)
 
 transform = FourPointBasisTransform(beta, wmax, scut=args.scut, comm=comm)
-transform.generate_projectors_for_fit()
 
-gf = transform.multiply_LocalGf2CP_PH(gf_left, gf_right, args.ninner, D, args.niter, args.rtol, args.alpha)
+gf = transform.multiply_LocalGf2CP_PH(gf_left, gf_right, args.n_max_inner, D, args.niter, args.rtol, args.alpha)
 
 if is_master_node:
     with h5py.File(args.path_output_file, 'a') as hf:

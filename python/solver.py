@@ -146,14 +146,14 @@ class FourPointBasisTransform:
     def _get_prj_multiply_PH_R(self, vertex):
         pass
 
-    def multiply_LocalGf2CP_PH(self, g_left, g_right, nw_max_inner, D_new, nite, rtol, alpha):
+    def multiply_LocalGf2CP_PH(self, g_left, g_right, n_max_inner, D_new, nite, rtol, alpha):
         assert self._prj_vertex is not None
 
         # Sampling points for multiplication
-        sp_left, sp_right = _construct_sampling_points_multiplication(range(-nw_max_inner, nw_max_inner), self._sp_local_F)
+        sp_left, sp_right = _construct_sampling_points_multiplication(range(-n_max_inner, n_max_inner), self._sp_local_F)
 
         num_w_outer = self._n_sp_local
-        num_w_inner = 2*nw_max_inner
+        num_w_inner = 2*n_max_inner
 
         sp_left = sp_left.reshape((num_w_outer * num_w_inner, 4))
         sp_right = sp_right.reshape((num_w_outer * num_w_inner, 4))
@@ -171,7 +171,8 @@ class FourPointBasisTransform:
         assert g_left.No == g_right.No
 
         verbose = self._rank == 0
-        xtensors = _multiply_LocalGf2CP_PH(self._n_sp_local, nw_max_inner, g_left, g_right, prj, prj_left, prj_right,
+
+        xtensors = _multiply_LocalGf2CP_PH(self._n_sp_local, num_w_inner, g_left, g_right, prj, prj_left, prj_right,
                                      D_new, nite, rtol, alpha, self._comm, seed=1, verbose=verbose)
 
         return LocalGf2CP(self.Lambda, Nl_result, g_left.No, D_new, xtensors, vertex_result)
@@ -186,18 +187,22 @@ class FourPointBasisTransform:
             setattr(self, name, None)
 
 
-def _multiply_LocalGf2CP_PH(Nw, Nw_inner, g_left, g_right, prj, prj_multiply_PH_L, prj_multiply_PH_R,
+def _multiply_LocalGf2CP_PH(Nw, num_w_inner, g_left, g_right, prj, prj_multiply_PH_L, prj_multiply_PH_R,
                                      D_new, nite, rtol, alpha, comm, seed=1, verbose=False):
     """
     Compute the product of two tensors in PH channel
     """
 
     Nr = 16
-    for i in range(1,4):
-        prj_multiply_PH_L[i] = prj_multiply_PH_L[i].reshape((Nw, Nw_inner, Nr))
-        prj_multiply_PH_R[i] = prj_multiply_PH_R[i].reshape((Nw, Nw_inner, Nr))
 
-    y0, y1 = _innersum_LocalGf2CP_PH(Nw, Nw_inner, g_left, g_right, prj_multiply_PH_L, prj_multiply_PH_R)
+    assert len(prj_multiply_PH_L)==2
+    assert len(prj_multiply_PH_R)==2
+    prj_multiply_PH_L = (prj_multiply_PH_L[0], prj_multiply_PH_L[1].reshape((3, Nw, num_w_inner, Nr)))
+    prj_multiply_PH_R = (prj_multiply_PH_R[0], prj_multiply_PH_R[1].reshape((3, Nw, num_w_inner, Nr)))
+
+    print('Computing product of two objects...', end='')
+    y0, y1 = _innersum_LocalGf2CP_PH(Nw, num_w_inner, g_left, g_right, prj_multiply_PH_L, prj_multiply_PH_R)
+    print('done!')
 
     Nw, _, _ = prj[0].shape
     No = g_left.tensors[-1].shape[1]
@@ -231,9 +236,9 @@ def _contract(Nw, num_w_inner, xr_L, xr_R, U_xls_L, U_xls_R, coords_trans_L, coo
         Product of tensors for IR and projectors (left object)
     :param U_xls_R: (3, Nr, D_R)
         Product of tensors for IR and projectors (right object)
-    :param coords_trans_L: (Nw, 2*nw_max_inner, 3, Nr)
+    :param coords_trans_L: (Nw, 2*n_max_inner, 3, Nr)
         Translation from 2pt frequencies to 1pt frequencies
-    :param coords_trans_R: (Nw, 2*nw_max_inner, 3, Nr)
+    :param coords_trans_R: (Nw, 2*n_max_inner, 3, Nr)
         Translation from 2pt frequencies to 1pt frequencies
     :param work_L: (Nr, D_L)
         Work array
@@ -269,13 +274,12 @@ def _contract(Nw, num_w_inner, xr_L, xr_R, U_xls_L, U_xls_R, coords_trans_L, coo
             for imat in range(3):
                 for r in range(Nr):
                     work_L[r, :] *= U_xls_L[imat, coords_trans_L[i_outer, i_inner, imat, r], :]
-                    print(imat, r, work_R[r, :], U_xls_R[imat, coords_trans_R[i_outer, i_inner, imat, r], :])
                     work_R[r, :] *= U_xls_R[imat, coords_trans_R[i_outer, i_inner, imat, r], :]
             work_L2[:] = numpy.sum(work_L, axis=0)
             work_R2[:] = numpy.sum(work_R, axis=0)
             out[i_outer, :, :] += numpy.outer(work_L2, work_R2)
 
-def _innersum_LocalGf2CP_PH(Nw, nw_max_inner, g_left, g_right, prj_multiply_PH_L, prj_multiply_PH_R):
+def _innersum_LocalGf2CP_PH(Nw, num_w_inner, g_left, g_right, prj_multiply_PH_L, prj_multiply_PH_R):
     """
     Compute the product of two tensors in PH channel
 
@@ -289,7 +293,7 @@ def _innersum_LocalGf2CP_PH(Nw, nw_max_inner, g_left, g_right, prj_multiply_PH_L
     D_R = g_right.D
 
     # Frequency part
-    x0 =_innersum_freq_PH(Nw, 2*nw_max_inner, g_left.tensors[0:4], g_right.tensors[0:4], prj_multiply_PH_L, prj_multiply_PH_R)
+    x0 =_innersum_freq_PH(Nw, num_w_inner, g_left.tensors[0:4], g_right.tensors[0:4], prj_multiply_PH_L, prj_multiply_PH_R)
 
     # Orbital part
     No = g_left.tensors[-1].shape[1]
@@ -333,7 +337,7 @@ def _innersum_freq_PH(nw_outer, num_w_inner, xfreqs_L, xfreqs_R, prj_multiply_PH
     work_R2 = numpy.empty((D_R,), dtype=numpy.complex)
 
     # Index conversion from 2pt frequency to 1pt frequency
-    # coords_trans_L, coords_trans_R: (3, nw_outer*nw_max_inner, Nr) => (nw_outer, nw_max_inner, 3, Nr)
+    # coords_trans_L, coords_trans_R: (3, nw_outer*n_max_inner, Nr) => (nw_outer, n_max_inner, 3, Nr)
     coords_trans_L = numpy.array(prj_multiply_PH_L[1]).reshape((3, nw_outer, num_w_inner, Nr)).transpose((1, 2, 0, 3))
     coords_trans_R = numpy.array(prj_multiply_PH_R[1]).reshape((3, nw_outer, num_w_inner, Nr)).transpose((1, 2, 0, 3))
 
@@ -399,9 +403,7 @@ def _innersum_freq_PH_ref(nw_outer, num_w_inner, xfreqs_L, xfreqs_R, prj_multipl
     subs.append((1, subs_r_R))
     tensor_values['xR0'] = xfreqs_R[0]
 
-    print(tensor_values['UR2'], tensor_values['UR2'].shape)
     tn = TensorNetwork(tensors, subs, (2, 0, 1))
-    print(tn)
     tn.find_contraction_path(verbose=True)
 
     return tn.evaluate(tensor_values).reshape((nw_outer, D_L * D_R)).transpose()
