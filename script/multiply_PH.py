@@ -67,5 +67,6 @@ transform = FourPointBasisTransform(beta, wmax, scut=args.scut, comm=comm)
 gf = transform.multiply_LocalGf2CP_PH(gf_left, gf_right, args.n_max_inner, D, args.niter, args.rtol, args.alpha)
 
 if is_master_node:
+    print("Saving results into ", args.path_output_file, "...")
     with h5py.File(args.path_output_file, 'a') as hf:
         gf.save(hf, '/D'+str(D))

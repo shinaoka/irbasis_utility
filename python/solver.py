@@ -40,6 +40,7 @@ class FourPointBasisTransform:
             If MPI is used, sampling points must be distributed over nodes.
         """
         self._Lambda = beta * wmax
+        self._beta = beta
 
         Nl_max_G = Nl_max if Nl_max is not None else None
         Nl_max_vertex = Nl_max+1 if Nl_max is not None else None
@@ -95,6 +96,10 @@ class FourPointBasisTransform:
     @property
     def Lambda(self):
         return self._Lambda
+
+    @property
+    def beta(self):
+        return self._beta
 
     @property
     def basis_G2(self):
@@ -180,7 +185,7 @@ class FourPointBasisTransform:
         xtensors = _multiply_LocalGf2CP_PH(self._n_sp_local, num_w_inner, g_left, g_right, prj, prj_left, prj_right,
                                      D_new, nite, rtol, alpha, self._comm, seed=1, verbose=verbose)
 
-        return LocalGf2CP(self.Lambda, Nl_result, g_left.No, D_new, xtensors, vertex_result)
+        return LocalGf2CP(self.beta, self.Lambda, Nl_result, g_left.No, D_new, xtensors, vertex_result)
 
 
     def clear_large_data(self):
