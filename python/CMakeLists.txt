@@ -4,15 +4,7 @@ four_point_ph_view.py regression.py internal.py tensor_regression.py lsqr.py
 tensor_regression_mps.py tensor_network.py auto_als.py tensor_regression_auto_als.py
 gf.py
 solver.py
-opt_einsum/__init__.py
-opt_einsum/_version.py
-opt_einsum/blas.py
-opt_einsum/contract.py
-opt_einsum/helpers.py
-opt_einsum/parser.py
-opt_einsum/path_random.py
-opt_einsum/paths.py
-opt_einsum/sharing.py)
+)
 foreach(file ${script_files})
     configure_file(${CMAKE_SOURCE_DIR}/python/${file} ${CMAKE_BINARY_DIR}/irbasis_util/${file} COPYONLY)
 endforeach(file)

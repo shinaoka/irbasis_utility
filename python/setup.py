@@ -44,17 +44,12 @@ setup(
 
         # Specify the Python versions you support here. In particular, ensure
         # that you indicate whether you support Python 2, Python 3 or both.
-        'Programming Language :: Python :: 2',
-        'Programming Language :: Python :: 2.7',
         'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.4',
-        'Programming Language :: Python :: 3.5',
-        'Programming Language :: Python :: 3.6',
     ],
 
     keywords='quantum many-body theory',
 
     packages = find_packages(exclude=['contrib', 'docs', 'tests']),
 
-    install_requires=['scipy', 'irbasis>=2.1.1', 'unittest2', 'chainmap', 'opt_einsum'],
+    install_requires=['scipy', 'irbasis>=2.1.1', 'unittest2', 'opt_einsum>=3.1.0'],
 )

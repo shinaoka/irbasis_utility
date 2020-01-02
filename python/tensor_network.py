@@ -1,7 +1,7 @@
 from __future__ import print_function
 
 import numpy
-from . import opt_einsum as oe
+import opt_einsum as oe
 import time
 
 _CHAR_LIST = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
@@ -197,8 +197,7 @@ class TensorNetwork(object):
         if mem_limit is None:
             mem_limit = 1E+18
         t1 = time.time()
-        contraction_path, string_repr = oe.contract_path(self._str_sub, *dummy_arrays, optimize='dynamic-programming')
-        self._contraction_path = ['einsum_path'] + contraction_path
+        self._contraction_path, string_repr = oe.contract_path(self._str_sub, *dummy_arrays, optimize='dynamic-programming')
         t2 = time.time()
         if verbose:
             print("Finding contraction path took ", t2-t1, " sec.")
@@ -232,7 +231,9 @@ class TensorNetwork(object):
             else:
                 arrays.append(values_of_tensors[t.name])
 
-        return numpy.ascontiguousarray(numpy.einsum(self._str_sub, *arrays, optimize=self._contraction_path))
+        r = numpy.ascontiguousarray(oe.contract(self._str_sub, *arrays, optimize=self._contraction_path))
+        del arrays
+        return r
 
     def find_tensor(self, tensor):
         """

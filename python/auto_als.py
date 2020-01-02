@@ -1,10 +1,7 @@
 from __future__ import print_function
 
 import numpy
-try:
-    from collections import ChainMap
-except ImportError:
-    from chainmap import ChainMap
+from collections import ChainMap
 from copy import deepcopy
 from .tensor_network import Tensor, TensorNetwork, conj_a_b, differentiate, from_int_to_char_subscripts
 from scipy.sparse.linalg import LinearOperator, lgmres
