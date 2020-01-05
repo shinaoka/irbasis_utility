@@ -231,7 +231,7 @@ class TensorNetwork(object):
             else:
                 arrays.append(values_of_tensors[t.name])
 
-        r = numpy.ascontiguousarray(oe.contract(self._str_sub, *arrays, optimize=self._contraction_path))
+        r = oe.contract(self._str_sub, *arrays, optimize=self._contraction_path, order='C')
         del arrays
         return r
 
