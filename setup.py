@@ -51,6 +51,6 @@ setup(
 
     packages = find_packages(exclude=['contrib', 'docs', 'tests']),
 
-    install_requires=['scipy', 'irbasis>=2.1.1', 'opt_einsum>=3.1.0', 'pkg_resources'],
+    install_requires=['scipy', 'irbasis>=2.1.1', 'opt_einsum>=3.1.0'],
     options={'bdist_wheel':{'universal':True}}
 )
