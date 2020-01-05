@@ -1,12 +1,12 @@
 function(add_python_test test)
     add_test(NAME python_${test} COMMAND ${PYTHON_EXECUTABLE} ${test}.py)
-    set_tests_properties(python_${test} PROPERTIES ENVIRONMENT "PYTHONPATH=${CMAKE_BINARY_DIR}/test/python")
+    set_tests_properties(python_${test} PROPERTIES ENVIRONMENT "PYTHONPATH=${CMAKE_BINARY_DIR}/test/irbasis_util")
 endfunction(add_python_test)
 
 function(add_python_mpi_test test)
     # Run tests with two MPI processes
     add_test(NAME python_${test} COMMAND ${MPIRUN} ${MPIRUN_NUMPROC_FLAG} 2 ${PYTHON_EXECUTABLE} ${test}.py)
-    set_tests_properties(python_${test} PROPERTIES ENVIRONMENT "PYTHONPATH=${CMAKE_BINARY_DIR}/test/python")
+    set_tests_properties(python_${test} PROPERTIES ENVIRONMENT "PYTHONPATH=${CMAKE_BINARY_DIR}/test/irbasis_util")
 endfunction(add_python_mpi_test)
 
 find_package(PythonInterp REQUIRED)

@@ -6,7 +6,7 @@ gf.py
 solver.py
 )
 foreach(file ${script_files})
-    configure_file(${CMAKE_SOURCE_DIR}/python/${file} ${CMAKE_BINARY_DIR}/irbasis_util/${file} COPYONLY)
+    configure_file(${CMAKE_SOURCE_DIR}/irbasis_util/${file} ${CMAKE_BINARY_DIR}/irbasis_util/${file} COPYONLY)
 endforeach(file)
 configure_file(${CMAKE_SOURCE_DIR}/setup.py ${CMAKE_BINARY_DIR}/setup.py COPYONLY)
 configure_file(${CMAKE_SOURCE_DIR}/README.md ${CMAKE_BINARY_DIR}/README.md COPYONLY)
