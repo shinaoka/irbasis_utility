@@ -352,6 +352,7 @@ class AutoALS:
         :param nesterov: bool
             Use Nesterov's acceleration
         """
+        sys.stdout.flush()
 
         rank = 0 if self._comm is None else self._comm.Get_rank()
 

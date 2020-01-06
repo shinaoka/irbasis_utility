@@ -37,10 +37,10 @@ parser.add_argument('--alpha', default=1e-8, type=float, help='regularization pa
 
 args = parser.parse_args()
 if os.path.isfile(args.path_input_file_left) is False:
-    print("Input file is not exist.")
+    print("Input file {}does not exist.".format(args.path_input_file_left))
     sys.exit(-1)
 if os.path.isfile(args.path_input_file_right) is False:
-    print("Input file is not exist.")
+    print("Input file {}does not exist.".format(args.path_input_file_right))
     sys.exit(-1)
 
 D = args.D
@@ -61,9 +61,11 @@ Lambda = gf_left.Lambda
 if rank == 0:
     print("Lambda = ", Lambda)
     print("beta = ", beta)
+    sys.stdout.flush()
 
 transform = FourPointBasisTransform(beta, wmax, scut=args.scut, comm=comm)
 
+comm.Barrier()
 gf = transform.multiply_LocalGf2CP_PH(gf_left, gf_right, args.n_max_inner, D, args.niter, args.rtol, args.alpha)
 
 if is_master_node:

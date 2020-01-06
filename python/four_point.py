@@ -31,12 +31,12 @@ def _construct_coords(n1_n2_n3_n4_vec, o_fb):
     max_o = numpy.amax(o_fb)
 
     num_o_dense = max_o - min_o + 1
-    map_o = numpy.empty(num_o_dense, dtype=numpy.int64)
+    map_o = numpy.empty(num_o_dense, dtype=numpy.int32)
     map_o[:] = -100000000
     for i in range(len(o_fb)):
         map_o[o_fb[i]-min_o] = i
 
-    coords = numpy.empty((3, nw, 16), dtype=numpy.int64)
+    coords = numpy.empty((3, nw, 16), dtype=numpy.int32)
     for i in range(nw):
         nvec = n1_n2_n3_n4_vec[i, :]
 
