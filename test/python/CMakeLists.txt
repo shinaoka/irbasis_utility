@@ -12,9 +12,9 @@ endfunction(add_python_mpi_test)
 find_package(PythonInterp REQUIRED)
 
 # Copy all library files
-file(GLOB_RECURSE LIB_FILES RELATIVE ${CMAKE_SOURCE_DIR}/python "${CMAKE_SOURCE_DIR}/python/*.py")
+file(GLOB_RECURSE LIB_FILES RELATIVE ${CMAKE_SOURCE_DIR}/irbasis_util "${CMAKE_SOURCE_DIR}/irbasis_util/*.py")
 foreach(libfile ${LIB_FILES})
-    configure_file(${CMAKE_SOURCE_DIR}/python/${libfile} ${CMAKE_BINARY_DIR}/test/python/irbasis_util/${libfile} COPYONLY)
+    configure_file(${CMAKE_SOURCE_DIR}/irbasis_util/${libfile} ${CMAKE_BINARY_DIR}/test/python/irbasis_util/${libfile} COPYONLY)
 endforeach()
 
 # copy test files
