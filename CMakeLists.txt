@@ -13,5 +13,5 @@ message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 enable_testing(test)
 add_subdirectory(test)
 
-add_subdirectory(python)
+add_subdirectory(irbasis_util)
 
