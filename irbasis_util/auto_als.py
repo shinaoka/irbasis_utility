@@ -73,7 +73,13 @@ class DiagonalLinearOperator(LinearOperator):
         Whether operator is diagonal or not.
 
     """
-    def __init__(self, shape, diagonals):
+    def __init__(self, diagonals):
+        diagonals = numpy.asarray(diagonals)
+        if diagonals.ndim != 1:
+            raise ValueError("diagonals must be vector")
+
+        size = diagonals.size
+        shape = size, size
         super(DiagonalLinearOperator, self).__init__(diagonals.dtype, shape)
         self._diagonals = diagonals
 
@@ -175,7 +181,7 @@ class LeastSquaresOpGenerator(object):
             A = op_array.reshape((N, N))
             return MatrixLinearOperator(A)
         elif self._op_is_diagonal:
-            return DiagonalLinearOperator((N, N), diagonals=op_array.transpose(self._trans_axes_diag))
+            return DiagonalLinearOperator(op_array.transpose(self._trans_axes_diag))
         else:
             matvec = lambda v: numpy.einsum(self._matvec_str, op_array, v.reshape(self._dims), optimize=True).ravel()
             rmatvec = lambda v : numpy.einsum(self._rmatvec_str, op_array, v.reshape(self._dims).conjugate(), optimize=True).conjugate().ravel()
@@ -222,7 +228,7 @@ def _sum_ops(ops):
         return LinearOperator((N1, N2), matvec=matvec, rmatvec=rmatvec)
 
 def _identity_operator(N):
-    return DiagonalLinearOperator((N, N), diagonals=numpy.ones(N))
+    return DiagonalLinearOperator(numpy.ones(N))
 
 def _is_matrix_operator(op):
     return isinstance(op, MatrixLinearOperator)
