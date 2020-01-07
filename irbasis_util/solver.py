@@ -324,9 +324,9 @@ def _contract(Nw, num_w_inner, xr_L, xr_R, U_xls_L, U_xls_R, coords_trans_L, coo
         Product of tensors for IR and projectors (left object)
     :param U_xls_R: (3, Nr, D_R)
         Product of tensors for IR and projectors (right object)
-    :param coords_trans_L: (Nw, 2*n_max_inner, 3, Nr)
+    :param coords_trans_L: (2*n_max_inner, 3, Nw, Nr)
         Translation from 2pt frequencies to 1pt frequencies
-    :param coords_trans_R: (Nw, 2*n_max_inner, 3, Nr)
+    :param coords_trans_R: (2*n_max_inner, 3, Nw, Nr)
         Translation from 2pt frequencies to 1pt frequencies
     :param out: (Nw, D_L, D_R)
         Output
@@ -334,8 +334,8 @@ def _contract(Nw, num_w_inner, xr_L, xr_R, U_xls_L, U_xls_R, coords_trans_L, coo
     D_L, Nr = xr_L.shape
     D_R, Nr = xr_R.shape
     assert Nr == 16
-    assert coords_trans_L.shape == (Nw, num_w_inner, 3, Nr)
-    assert coords_trans_R.shape == (Nw, num_w_inner, 3, Nr)
+    assert coords_trans_L.shape == (num_w_inner, 3, Nw, Nr)
+    assert coords_trans_R.shape == (num_w_inner, 3, Nw, Nr)
     _, N_1pfreq_L, _ =  U_xls_L.shape
     _, N_1pfreq_R, _ =  U_xls_R.shape
 
@@ -346,8 +346,8 @@ def _contract(Nw, num_w_inner, xr_L, xr_R, U_xls_L, U_xls_R, coords_trans_L, coo
 
     assert out.shape == (Nw, D_L, D_R)
 
-    coords_trans_L_tmp = coords_trans_L.transpose((1, 2, 0, 3)).reshape((num_w_inner, 3, Nw*Nr))
-    coords_trans_R_tmp = coords_trans_R.transpose((1, 2, 0, 3)).reshape((num_w_inner, 3, Nw*Nr))
+    coords_trans_L_tmp = coords_trans_L.reshape((num_w_inner, 3, Nw*Nr))
+    coords_trans_R_tmp = coords_trans_R.reshape((num_w_inner, 3, Nw*Nr))
 
     out[:, :, :] = 0.0
     for i_inner in range(num_w_inner):
@@ -362,7 +362,7 @@ def _contract(Nw, num_w_inner, xr_L, xr_R, U_xls_L, U_xls_R, coords_trans_L, coo
         work_R2[:, :] = numpy.sum(work_R, axis=1)
 
         # Contract left and right objects
-        out[:, :, :] += numpy.einsum('wD,wE->wDE', work_L2, work_R2)
+        out[:, :, :] += numpy.einsum('wD,wE->wDE', work_L2, work_R2, optimize=True)
 
 
 def _innersum_LocalGf2CP_PH(Nw, num_w_inner, g_left, g_right, prj_multiply_PH_L, prj_multiply_PH_R):
@@ -419,9 +419,9 @@ def _innersum_freq_PH(nw_outer, num_w_inner, xfreqs_L, xfreqs_R, prj_multiply_PH
     x0 = numpy.empty((nw_outer, D_L, D_R), dtype=numpy.complex)
 
     # Index conversion from 2pt frequency to 1pt frequency
-    # coords_trans_L, coords_trans_R: (3, nw_outer*n_max_inner, Nr) => (nw_outer, n_max_inner, 3, Nr)
-    coords_trans_L = numpy.array(prj_multiply_PH_L[1]).reshape((3, nw_outer, num_w_inner, Nr)).transpose((1, 2, 0, 3))
-    coords_trans_R = numpy.array(prj_multiply_PH_R[1]).reshape((3, nw_outer, num_w_inner, Nr)).transpose((1, 2, 0, 3))
+    # coords_trans_L, coords_trans_R: (3, nw_outer*n_max_inner, Nr) => (n_max_inner, 3, nw_outer, Nr)
+    coords_trans_L = prj_multiply_PH_L[1].reshape((3, nw_outer, num_w_inner, Nr)).transpose((2, 0, 1, 3))
+    coords_trans_R = prj_multiply_PH_R[1].reshape((3, nw_outer, num_w_inner, Nr)).transpose((2, 0, 1, 3))
 
     _contract(nw_outer, num_w_inner, xfreqs_L[0], xfreqs_R[0],
               UnD_L, UnD_R,
