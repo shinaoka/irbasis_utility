@@ -49,6 +49,22 @@ class MatrixLinearOperator(LinearOperator):
             self.__adj = _AdjointMatrixLinearOperator(self)
         return self.__adj
 
+
+class _AdjointMatrixLinearOperator(MatrixLinearOperator):
+    def __init__(self, adjoint):
+        self.A = adjoint.A.T.conj()
+        self.__adjoint = adjoint
+        self.args = (adjoint,)
+        self.shape = adjoint.shape[1], adjoint.shape[0]
+
+    @property
+    def dtype(self):
+        return self.__adjoint.dtype
+
+    def _adjoint(self):
+        return self.__adjoint
+
+
 class DiagonalLinearOperator(LinearOperator):
     """
     Thin wrapper of scipy.sparse.linalg.LinearOperator
