@@ -4,7 +4,7 @@ import numpy
 from collections import ChainMap
 from copy import deepcopy
 from .tensor_network import Tensor, TensorNetwork, conj_a_b, differentiate, from_int_to_char_subscripts
-from scipy.sparse.linalg import LinearOperator, lgmres, aslinearoperator
+from scipy.sparse.linalg import LinearOperator, lgmres, aslinearoperator, LinearOperator
 import sys
 import time
 from threadpoolctl import threadpool_info, threadpool_limits
@@ -29,6 +29,48 @@ def _is_list_of_instance(object, classinfo):
 
 def _trans_axes(src_subs, dst_subs):
     return tuple([src_subs.index(s) for s in dst_subs])
+
+def _trans_axes_diag(src_subs, left_subs):
+    return tuple([src_subs.index(s) for s in left_subs])
+
+class MatrixLinearOperator(LinearOperator):
+    # From https://github.com/scipy/scipy/blob/v1.4.1/scipy/sparse/linalg/interface.py
+    def __init__(self, A):
+        super(MatrixLinearOperator, self).__init__(A.dtype, A.shape)
+        self.A = A
+        self.__adj = None
+        self.args = (A,)
+
+    def _matmat(self, X):
+        return self.A.dot(X)
+
+    def _adjoint(self):
+        if self.__adj is None:
+            self.__adj = _AdjointMatrixLinearOperator(self)
+        return self.__adj
+
+class DiagonalLinearOperator(LinearOperator):
+    """
+    Thin wrapper of scipy.sparse.linalg.LinearOperator
+
+    :param is_diagonal: Bool
+        Whether operator is diagonal or not.
+
+    """
+    def __init__(self, shape, diagonals):
+        super(DiagonalLinearOperator, self).__init__(diagonals.dtype, shape)
+        self._diagonals = diagonals
+
+    def _matvec(self, x):
+        return self._diagonals * x
+
+    def _rmatvec(self, x):
+        return numpy.conj(self._diagonals) * x
+
+    @property
+    def diagonals(self):
+        return self._diagonals
+
 
 class LeastSquaresOpGenerator(object):
     """
@@ -61,11 +103,23 @@ class LeastSquaresOpGenerator(object):
         A_subs = self._A_tn.external_subscripts
         op_subs, left_subs, right_subs = from_int_to_char_subscripts([A_subs, tc_subs, t_subs])
 
+        # Dense matrix 
         self._op_is_matrix = len(left_subs) + len(right_subs) == len(op_subs)
 
+        # Diagonal
+        self._op_is_diagonal = set(left_subs) == set(right_subs)
+
+        if self._op_is_matrix and self._op_is_diagonal:
+            # For instance, operator is a sclar, treat this operator as a diagonal one.
+            self._op_is_matrix = False
+
         if self._op_is_matrix:
-            #Transpose axes of matrix
+            # As dense matrix
+            # Transpose axes of matrix
             self._trans_axes = _trans_axes(op_subs, left_subs + right_subs)
+        elif self._op_is_diagonal:
+            assert left_subs == right_subs
+            self._trans_axes_diag = _trans_axes_diag(op_subs, left_subs)
         else:
             op_subs_str = ''.join(op_subs)
             left_subs_str = ''.join(left_subs)
@@ -98,25 +152,46 @@ class LeastSquaresOpGenerator(object):
         if self._op_is_matrix:
             op_array = op_array.transpose(self._trans_axes)
             A = op_array.reshape((N, N))
-            return aslinearoperator(A)
+            return MatrixLinearOperator(A)
+        elif self._op_is_diagonal:
+            return DiagonalLinearOperator((N, N), diagonals=op_array.transpose(self._trans_axes_diag))
         else:
             matvec = lambda v: numpy.einsum(self._matvec_str, op_array, v.reshape(self._dims), optimize=True).ravel()
             rmatvec = lambda v : numpy.einsum(self._rmatvec_str, op_array, v.reshape(self._dims).conjugate(), optimize=True).conjugate().ravel()
             return LinearOperator((N, N), matvec=matvec, rmatvec=rmatvec)
 
-
-def _sum_ops_flipped_sign(ops):
-    # Compute sum of linear operators of the same shape and flip the sign
-    matvec = lambda v: -sum([coeff * o.matvec(v) for coeff, o in ops])
-    rmatvec = lambda v: -sum([numpy.conj(coeff) * o.rmatvec(v) for coeff, o in ops])
-    N1, N2 = ops[0][1].shape
-    return LinearOperator((N1, N2), matvec=matvec, rmatvec=rmatvec)
+def _sum_ops(ops):
+    # Sum of linear operators
+    # If each operator is a matrix or diagonal and at least one operator is a matrix, evaluate the sum as a dense matrix.
+    # Otherwise, construct a linear representing the sum.
+    num_matrix_op = numpy.sum([isinstance(o, MatrixLinearOperator) for _, o in ops])
+    
+    if num_matrix_op > 0 and numpy.all([isinstance(o, MatrixLinearOperator) or isinstance(o, DiagonalLinearOperator) for _, o in ops]):
+        dtype = numpy.dtype(numpy.float64)
+        for coeff, o in ops:
+            dtype = numpy.promote_types(dtype, numpy.min_scalar_type(coeff))
+            dtype = numpy.promote_types(dtype, o.dtype)
+        N = ops[0][1].shape[0]
+        A = numpy.zeros((N, N), dtype=dtype)
+        for coeff, o in ops:
+            if isinstance(o, MatrixLinearOperator):
+                A += coeff * o.A
+            elif isinstance(o, DiagonalLinearOperator):
+                A += coeff * numpy.diag(o.diagonals)
+            else:
+               raise RuntimeError("Something got wrong!")
+        return A
+    else:
+        matvec = lambda v: sum([coeff * o.matvec(v) for coeff, o in ops])
+        rmatvec = lambda v: sum([numpy.conj(coeff) * o.rmatvec(v) for coeff, o in ops])
+        N1, N2 = ops[0][1].shape
+        return LinearOperator((N1, N2), matvec=matvec, rmatvec=rmatvec)
 
 def _identity_operator(N):
-    matvec = lambda v: v
-    rmatvec = lambda v: v
-    return LinearOperator((N, N), matvec=matvec, rmatvec=rmatvec)
+    return DiagonalLinearOperator((N, N), diagonals=numpy.ones(N))
 
+def _is_matrix_operator(op):
+    return isinstance(op, MatrixLinearOperator)
 
 class LinearOperatorGenerator(object):
     """
@@ -131,12 +206,11 @@ class LinearOperatorGenerator(object):
         self._reg_L2 = reg_L2
 
     def construct(self, tensors_value):
-        # Note sign is flipped
         ops = [(coeff, genA.construct(tensors_value)) for coeff, genA in self._generators]
         if self._reg_L2 != 0:
             N = self._generators[0][1].size
             ops.append((self._reg_L2, _identity_operator(N)))
-        return _sum_ops_flipped_sign(ops)
+        return _sum_ops(ops)
 
 class VectorGenerator(object):
     """
@@ -310,15 +384,18 @@ class AutoALS:
             # Enable multithreading in blas
             with threadpool_limits(limits=self._num_threads, user_api='blas'):
                 # Solve the linear system
-                # TODO: Use numpy.linalg.solve() for a dense matrix
-                #     (direct solver is more efficient in this case).
+                #  Use numpy.linalg.solve() for a dense matrix
                 if self._rank == 0:
-                    x0 = tensors_value[name].ravel()
-                    if numpy.linalg.norm(vec_y - opA.matvec(x0)) > numpy.linalg.norm(vec_y):
-                        x0 = None
-                    # Solve only on master node
-                    r = lgmres(opA, vec_y, tol=1e-10, atol=0, x0=x0)
-                    tensors_value[name][:] = r[0].reshape(tensors_value[name].shape)
+                    # Solve Ax + y = 0 for x on master node
+                    if isinstance(opA, numpy.ndarray):
+                        r = numpy.linalg.solve(opA, -vec_y)
+                        tensors_value[name][:] = r.reshape(tensors_value[name].shape)
+                    else:
+                        x0 = tensors_value[name].ravel()
+                        if numpy.linalg.norm(vec_y - opA.matvec(x0)) > numpy.linalg.norm(vec_y):
+                            x0 = None
+                        r = lgmres(opA, -vec_y, tol=1e-10, atol=0, x0=x0)
+                        tensors_value[name][:] = r[0].reshape(tensors_value[name].shape)
                 t4 = time.time()
                 if self._comm is not None:
                     self._comm.Barrier()
