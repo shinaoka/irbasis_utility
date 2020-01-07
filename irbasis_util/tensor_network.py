@@ -207,7 +207,7 @@ class TensorNetwork(object):
     def has(self, tensor):
         return tensor in self._tensors
 
-    def evaluate(self, values_of_tensors):
+    def evaluate(self, values_of_tensors, backend='numpy'):
         """
         Evaluate the tensor network
 
@@ -231,7 +231,14 @@ class TensorNetwork(object):
             else:
                 arrays.append(values_of_tensors[t.name])
 
-        r = oe.contract(self._str_sub, *arrays, optimize=self._contraction_path, order='C')
+        if backend=='numpy':
+            r = oe.contract(self._str_sub, *arrays, optimize=self._contraction_path, order='C')
+        elif backend=='cupy':
+            import cupy
+            r = cupy.ascontiguousarray(oe.contract(self._str_sub, *arrays, optimize=self._contraction_path, backend='cupy'))
+        else:
+            raise RuntimeError('Unknown backend: {}'.format(backend))
+
         del arrays
         return r
 
