@@ -31,7 +31,7 @@ def predict(prj, x_tensors):
     #print(t2-t1, t3-t2, t4-t3)
     return tmp_wo
 
-def fit(y, prj, D, nite,  rtol = 1e-3, verbose=0, random_init=True, x0=None, alpha=1e-8, comm=None, seed=1, nesterov=True):
+def fit(y, prj, D, nite,  rtol = 1e-3, verbose=0, random_init=True, x0=None, alpha=1e-8, comm=None, seed=1, nesterov=True, num_threads=1):
     """
     Alternating least squares with L2 regularization
 
@@ -64,6 +64,8 @@ def fit(y, prj, D, nite,  rtol = 1e-3, verbose=0, random_init=True, x0=None, alp
     nesterov: bool
         Use Nesterov's acceleration
 
+    num_threads: int
+        Number of threads for blas
 
     Returns
     -------
@@ -79,10 +81,10 @@ def fit(y, prj, D, nite,  rtol = 1e-3, verbose=0, random_init=True, x0=None, alp
 
     Y_tn = TensorNetwork([Tensor('Y', (num_w, num_o))], [(0,1)], external_subscripts={0,1})
 
-    return fit_impl(Y_tn, {'Y': y}, prj, D, nite,  rtol, verbose, random_init, x0, alpha, comm, seed, nesterov)
+    return fit_impl(Y_tn, {'Y': y}, prj, D, nite,  rtol, verbose, random_init, x0, alpha, comm, seed, nesterov, num_threads)
 
 
-def fit_impl(Y_tn, Y_tensors, prj, D, nite,  rtol = 1e-3, verbose=0, random_init=True, x0=None, alpha=1e-8, comm=None, seed=1, nesterov=True):
+def fit_impl(Y_tn, Y_tensors, prj, D, nite,  rtol = 1e-3, verbose=0, random_init=True, x0=None, alpha=1e-8, comm=None, seed=1, nesterov=True, num_threads=1):
     """
 
     Parameters
@@ -170,7 +172,7 @@ def fit_impl(Y_tn, Y_tensors, prj, D, nite,  rtol = 1e-3, verbose=0, random_init
             tensors_value[name][:] = comm.bcast(tensors_value[name], root=0)
 
     distributed_subscript = 0 if is_enabled_MPI else None
-    als = AutoALS(Y_tn, tY_tn, target_tensors, reg_L2=alpha, comm=comm, distributed_subscript=distributed_subscript)
+    als = AutoALS(Y_tn, tY_tn, target_tensors, reg_L2=alpha, comm=comm, distributed_subscript=distributed_subscript, num_threads=num_threads)
     als.fit(nite, tensors_value, rtol=rtol, nesterov=nesterov, verbose=verbose)
 
     for i in range(freq_dim + 2):

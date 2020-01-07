@@ -4,9 +4,10 @@ import numpy
 from collections import ChainMap
 from copy import deepcopy
 from .tensor_network import Tensor, TensorNetwork, conj_a_b, differentiate, from_int_to_char_subscripts
-from scipy.sparse.linalg import LinearOperator, lgmres
+from scipy.sparse.linalg import LinearOperator, lgmres, aslinearoperator, LinearOperator
 import sys
 import time
+from threadpoolctl import threadpool_info, threadpool_limits
 
 def _mpi_split(work_size, comm_size):
     base = work_size // comm_size
@@ -29,11 +30,53 @@ def _is_list_of_instance(object, classinfo):
 def _trans_axes(src_subs, dst_subs):
     return tuple([src_subs.index(s) for s in dst_subs])
 
+def _trans_axes_diag(src_subs, left_subs):
+    return tuple([src_subs.index(s) for s in left_subs])
+
+class MatrixLinearOperator(LinearOperator):
+    # From https://github.com/scipy/scipy/blob/v1.4.1/scipy/sparse/linalg/interface.py
+    def __init__(self, A):
+        super(MatrixLinearOperator, self).__init__(A.dtype, A.shape)
+        self.A = A
+        self.__adj = None
+        self.args = (A,)
+
+    def _matmat(self, X):
+        return self.A.dot(X)
+
+    def _adjoint(self):
+        if self.__adj is None:
+            self.__adj = _AdjointMatrixLinearOperator(self)
+        return self.__adj
+
+class DiagonalLinearOperator(LinearOperator):
+    """
+    Thin wrapper of scipy.sparse.linalg.LinearOperator
+
+    :param is_diagonal: Bool
+        Whether operator is diagonal or not.
+
+    """
+    def __init__(self, shape, diagonals):
+        super(DiagonalLinearOperator, self).__init__(diagonals.dtype, shape)
+        self._diagonals = diagonals
+
+    def _matvec(self, x):
+        return self._diagonals * x
+
+    def _rmatvec(self, x):
+        return numpy.conj(self._diagonals) * x
+
+    @property
+    def diagonals(self):
+        return self._diagonals
+
+
 class LeastSquaresOpGenerator(object):
     """
     Coefficient matrix of a least squares problem
     """
-    def __init__(self, target_tensor, term, comm, distributed, parallel_solver, verbose=False, mem_limit=1E+19):
+    def __init__(self, target_tensor, term, comm, distributed, verbose=False, mem_limit=1E+19):
         """
 
         :param target_tensor: Tensor
@@ -44,15 +87,12 @@ class LeastSquaresOpGenerator(object):
              MPI communicator
         :param distributed: bool
              If True, the linear operator is summed over all MPI nodes.
-        :param parallel_solver:
-             If True, the linear operator uses MPI parallelization
         """
         assert not target_tensor.is_conj
 
         self._target_tensor = target_tensor
         self._comm = comm
         self._distributed = distributed
-        self._parallel_solver = parallel_solver
 
         # Tensor network for A
         self._A_tn = differentiate(term, [target_tensor.conjugate(), target_tensor])
@@ -63,12 +103,23 @@ class LeastSquaresOpGenerator(object):
         A_subs = self._A_tn.external_subscripts
         op_subs, left_subs, right_subs = from_int_to_char_subscripts([A_subs, tc_subs, t_subs])
 
+        # Dense matrix 
         self._op_is_matrix = len(left_subs) + len(right_subs) == len(op_subs)
-        self._use_matrix = self._parallel_solver and self._op_is_matrix
 
-        if self._use_matrix:
-            #Transpose axes of matrix
+        # Diagonal
+        self._op_is_diagonal = set(left_subs) == set(right_subs)
+
+        if self._op_is_matrix and self._op_is_diagonal:
+            # For instance, operator is a sclar, treat this operator as a diagonal one.
+            self._op_is_matrix = False
+
+        if self._op_is_matrix:
+            # As dense matrix
+            # Transpose axes of matrix
             self._trans_axes = _trans_axes(op_subs, left_subs + right_subs)
+        elif self._op_is_diagonal:
+            assert left_subs == right_subs
+            self._trans_axes_diag = _trans_axes_diag(op_subs, left_subs)
         else:
             op_subs_str = ''.join(op_subs)
             left_subs_str = ''.join(left_subs)
@@ -97,72 +148,82 @@ class LeastSquaresOpGenerator(object):
         #t3 = time.time()
         #print('const: ', t2-t1, t3-t2, op_array.shape)
         N = self._size
-        if self._use_matrix:
+
+        if self._op_is_matrix:
             op_array = op_array.transpose(self._trans_axes)
-
-            to_mpitype = lambda x: MPI.COMPLEX16 if numpy.iscomplexobj(x) else MPI.DOUBLE
-
-            rank = self._comm.Get_rank() 
-            sizes, offsets = _mpi_split(N, self._comm.Get_size())
-            start, end = offsets[rank], offsets[rank] + sizes[rank]
-            A = op_array.reshape((N, N))[start:end, :]
-            conjA = (op_array.reshape((N, N))[:, start:end]).conjugate().transpose()
-
-            def matvec(v):
-                Av = numpy.dot(A,v).ravel()
-                recv = numpy.empty(N, dtype=Av.dtype)
-                recv[:] = numpy.nan
-                mpi_type = to_mpitype(Av)
-                self._comm.Allgatherv([Av, len(Av), mpi_type], [recv, sizes, offsets, mpi_type])
-                return recv
-
-            def rmatvec(v):
-                cAv = numpy.dot(conjA,v).ravel()
-                recv = numpy.empty(N, dtype=cAv.dtype)
-                recv[:] = numpy.nan
-                mpi_type = to_mpitype(cAv)
-                self._comm.Allgatherv([cAv, len(cAv), mpi_type], [recv, sizes, offsets, mpi_type])
-                return recv
-
-            return LinearOperator((N, N), matvec=matvec, rmatvec=rmatvec)
+            A = op_array.reshape((N, N))
+            return MatrixLinearOperator(A)
+        elif self._op_is_diagonal:
+            return DiagonalLinearOperator((N, N), diagonals=op_array.transpose(self._trans_axes_diag))
         else:
             matvec = lambda v: numpy.einsum(self._matvec_str, op_array, v.reshape(self._dims), optimize=True).ravel()
             rmatvec = lambda v : numpy.einsum(self._rmatvec_str, op_array, v.reshape(self._dims).conjugate(), optimize=True).conjugate().ravel()
             return LinearOperator((N, N), matvec=matvec, rmatvec=rmatvec)
 
+def _sum_ops(ops):
+    # Sum of linear operators
+    # If each operator is a matrix or diagonal and at least one operator is a matrix, evaluate the sum as a dense matrix.
+    # If all operators are diagonal, return diagonal elements.
+    # Otherwise, construct a linear representing the sum.
+    num_matrix_op = numpy.sum([isinstance(o, MatrixLinearOperator) for _, o in ops])
+    is_all_diagonal = numpy.all([isinstance(o, DiagonalLinearOperator) for _, o in ops])
 
-def _sum_ops_flipped_sign(ops):
-    # Compute sum of linear operators of the same shape and flip the sign
-    matvec = lambda v: -sum([coeff * o.matvec(v) for coeff, o in ops])
-    rmatvec = lambda v: -sum([numpy.conj(coeff) * o.rmatvec(v) for coeff, o in ops])
-    N1, N2 = ops[0][1].shape
-    return LinearOperator((N1, N2), matvec=matvec, rmatvec=rmatvec)
+    def op_dtype():
+        dtype = numpy.dtype(numpy.float64)
+        for coeff, o in ops:
+            dtype = numpy.promote_types(dtype, numpy.min_scalar_type(coeff))
+            dtype = numpy.promote_types(dtype, o.dtype)
+        return dtype
+
+    if is_all_diagonal:
+        dtype = op_dtype()
+        N = ops[0][1].shape[0]
+        diagonals = numpy.zeros((N,), dtype=dtype)
+        for coeff, o in ops:
+            diagonals += coeff * o.diagonals
+        return diagonals
+    elif num_matrix_op > 0 and numpy.all([isinstance(o, MatrixLinearOperator) or isinstance(o, DiagonalLinearOperator) for _, o in ops]):
+        dtype = op_dtype()
+        N = ops[0][1].shape[0]
+        A = numpy.zeros((N, N), dtype=dtype)
+        for coeff, o in ops:
+            if isinstance(o, MatrixLinearOperator):
+                A += coeff * o.A
+            elif isinstance(o, DiagonalLinearOperator):
+                A += coeff * numpy.diag(o.diagonals)
+            else:
+               raise RuntimeError("Something got wrong!")
+        return A
+    else:
+        matvec = lambda v: sum([coeff * o.matvec(v) for coeff, o in ops])
+        rmatvec = lambda v: sum([numpy.conj(coeff) * o.rmatvec(v) for coeff, o in ops])
+        N1, N2 = ops[0][1].shape
+        return LinearOperator((N1, N2), matvec=matvec, rmatvec=rmatvec)
 
 def _identity_operator(N):
-    matvec = lambda v: v
-    rmatvec = lambda v: v
-    return LinearOperator((N, N), matvec=matvec, rmatvec=rmatvec)
+    return DiagonalLinearOperator((N, N), diagonals=numpy.ones(N))
 
+def _is_matrix_operator(op):
+    return isinstance(op, MatrixLinearOperator)
 
 class LinearOperatorGenerator(object):
     """
     Differentiate sum of terms representing scalar tensors and construct a generator of LinearOperator
     """
-    def __init__(self, target_tensor, terms, comm, distributed, parallel_solver, reg_L2, verbose, mem_limit):
+    def __init__(self, target_tensor, terms, comm, distributed, reg_L2, verbose, mem_limit):
         self._generators = []
         for coeff, term in terms:
             if term.has(target_tensor) and term.has(target_tensor.conjugate()):
-                genA = LeastSquaresOpGenerator(target_tensor, term, comm, distributed, parallel_solver, verbose, mem_limit)
+                genA = LeastSquaresOpGenerator(target_tensor, term, comm, distributed, verbose, mem_limit)
                 self._generators.append((coeff, genA))
         self._reg_L2 = reg_L2
 
     def construct(self, tensors_value):
-        # Note sign is flipped
         ops = [(coeff, genA.construct(tensors_value)) for coeff, genA in self._generators]
         if self._reg_L2 != 0:
             N = self._generators[0][1].size
             ops.append((self._reg_L2, _identity_operator(N)))
-        return _sum_ops_flipped_sign(ops)
+        return _sum_ops(ops)
 
 class VectorGenerator(object):
     """
@@ -197,7 +258,7 @@ class AutoALS:
     """
     Automated alternating least squares fitting of tensor network
     """
-    def __init__(self, Y, tilde_Y, target_tensors, reg_L2=0.0, comm=None, distributed_subscript=None, mem_limit=1E+19):
+    def __init__(self, Y, tilde_Y, target_tensors, reg_L2=0.0, comm=None, distributed_subscript=None, mem_limit=1E+19, num_threads=1):
         """
 
         :param Y: a list of TensorNetwork
@@ -217,6 +278,8 @@ class AutoALS:
             That index can have different sizes on different processes.
         :param mem_limit: Integer
             mememory limit for einsum_path. 1E+8 * 16 Byte = 1.6 GB
+        :param num_threads: Integer
+            Number of threads set for blas backend of numpy when solving linear systems.
         """
 
         if isinstance(Y, TensorNetwork):
@@ -277,13 +340,14 @@ class AutoALS:
         self._A_generators = {}
         self._y_generators = {}
         for t in target_tensors:
-            self._A_generators[t.name] = LinearOperatorGenerator(t, all_terms, comm, self._distributed, not comm is None, reg_L2, self._rank==0, self._mem_limit)
+            self._A_generators[t.name] = LinearOperatorGenerator(t, all_terms, comm, self._distributed, reg_L2, self._rank==0, self._mem_limit)
             self._y_generators[t.name] = VectorGenerator(t, all_terms, comm, self._distributed)
 
         self._target_tensors = target_tensors
         self._target_tensor_names = set([t.name for t in self._target_tensors])
         self._reg_L2 = reg_L2
 
+        self._num_threads = num_threads
 
     def squared_error(self, tensors_value):
         """
@@ -315,27 +379,46 @@ class AutoALS:
         norm2 = numpy.sum([numpy.linalg.norm(tensors_value[name])**2 for name in self._target_tensor_names])
         return se + self._reg_L2 * norm2
 
-    def _one_sweep(self, params, constants):
+    def _one_sweep(self, params, constants, verbose=False):
         # One sweep of ALS
         # Shallow copy
         params_new = deepcopy(params)
         tensors_value = ChainMap(params_new, constants)
         for target_tensor in self._target_tensors:
-            name = target_tensor.name
-            t1 = time.time()
-            opA = self._A_generators[name].construct(tensors_value)
-            t2 = time.time()
-            vec_y = self._y_generators[name].construct(tensors_value)
-            t3 = time.time()
-            # FIXME: Is A a hermitian?
-            r = lgmres(opA, vec_y, tol=1e-10, x0=tensors_value[name].ravel())
-            t4 = time.time()
-            #print(name, t2-t1, t3-t2, t4-t3)
-            #print("res", numpy.linalg.norm(vec_y-opA(r[0])), numpy.linalg.norm(vec_y))
-            if self._comm is None:
-                tensors_value[name][:] = r[0].reshape(tensors_value[name].shape)
-            else:
-                tensors_value[name][:] = self._comm.bcast(r[0].reshape(tensors_value[name].shape), root=0)
+            # Disable multithreading in blas
+            with threadpool_limits(limits=1, user_api='blas'):
+                name = target_tensor.name
+                t1 = time.time()
+                opA = self._A_generators[name].construct(tensors_value)
+                t2 = time.time()
+                vec_y = self._y_generators[name].construct(tensors_value)
+                t3 = time.time()
+
+            # Enable multithreading in blas
+            with threadpool_limits(limits=self._num_threads, user_api='blas'):
+                # Solve the linear system
+                #  Use numpy.linalg.solve() for a dense matrix
+                if self._rank == 0:
+                    # Solve Ax + y = 0 for x on master node
+                    if isinstance(opA, numpy.ndarray) and opA.ndim == 1:
+                        r = -vec_y/opA
+                        tensors_value[name][:] = r.reshape(tensors_value[name].shape)
+                    elif isinstance(opA, numpy.ndarray) and opA.ndim == 2:
+                        r = numpy.linalg.solve(opA, -vec_y)
+                        tensors_value[name][:] = r.reshape(tensors_value[name].shape)
+                    else:
+                        x0 = tensors_value[name].ravel()
+                        if numpy.linalg.norm(vec_y - opA.matvec(x0)) > numpy.linalg.norm(vec_y):
+                            x0 = None
+                        r = lgmres(opA, -vec_y, tol=1e-10, atol=0, x0=x0)
+                        tensors_value[name][:] = r[0].reshape(tensors_value[name].shape)
+                t4 = time.time()
+                if self._comm is not None:
+                    self._comm.Barrier()
+                    tensors_value[name][:] = self._comm.bcast(tensors_value[name], root=0)
+                if self._rank == 0:
+                    print(' timings: ', t2-t1, t3-t2, t4-t3)
+
         return params_new
 
 
@@ -352,6 +435,7 @@ class AutoALS:
         :param nesterov: bool
             Use Nesterov's acceleration
         """
+        sys.stdout.flush()
 
         rank = 0 if self._comm is None else self._comm.Get_rank()
 

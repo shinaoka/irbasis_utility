@@ -10,6 +10,7 @@ from .gf import LocalGf2CP
 import numpy
 import copy
 import time
+import sys
 
 def mpi_split(work_size, comm_size):
     base = work_size // comm_size
@@ -86,6 +87,8 @@ class FourPointBasisTransform:
         self._rank = rank
 
         self._generate_projectors_for_fit()
+        if self._comm is not None:
+            self._comm.Barrier()
 
     @property
     def n_sp_local(self):
@@ -124,7 +127,7 @@ class FourPointBasisTransform:
             self._prj_G2 = [self._prj_vertex[imat][:, :, 1:] for imat in range(3)]
 
 
-    def fit_LocalGf2CP(self, g, data_sp, niter, random_init=True, rtol=1e-8, alpha=1e-8, verbose=1, seed=100):
+    def fit_LocalGf2CP(self, g, data_sp, niter, random_init=True, rtol=1e-8, alpha=1e-8, verbose=1, seed=100, num_threads=1):
         assert data_sp.shape[0] == self._n_sp_local
 
         # Find non-zero orbital components
@@ -138,7 +141,7 @@ class FourPointBasisTransform:
         D = g.D
 
         tensors = fit(data_sp[:, orb_idx], prj, D, niter, rtol, verbose=verbose,
-                 random_init=random_init, comm=self._comm, seed=seed, alpha=alpha, nesterov=True, x0=x0)
+                 random_init=random_init, comm=self._comm, seed=seed, alpha=alpha, nesterov=True, x0=x0, num_threads=num_threads)
 
         for i in range(4):
             g.tensors[i][:] = tensors[i][:]
@@ -154,6 +157,8 @@ class FourPointBasisTransform:
 
     def multiply_LocalGf2CP_PH(self, g_left, g_right, n_max_inner, D_new, nite, rtol, alpha):
         assert self._prj_vertex is not None
+        if self._comm is not None:
+            self._comm.Barrier()
 
         # Sampling points for multiplication
         sp_left, sp_right = _construct_sampling_points_multiplication(range(-n_max_inner, n_max_inner), self._sp_local_F)
@@ -164,19 +169,33 @@ class FourPointBasisTransform:
         sp_left = sp_left.reshape((num_w_outer * num_w_inner, 4))
         sp_right = sp_right.reshape((num_w_outer * num_w_inner, 4))
 
+        if self._comm is not None:
+            self._comm.Barrier()
+
         # Projectors
         basis_dict = {True: self.basis_vertex, False: self.basis_G2}
         if self._rank == 0:
             print("Generating projectors for left object...")
+            sys.stdout.flush()
+        if self._comm is not None:
+            self._comm.Barrier()
         prj_left = basis_dict[g_left.vertex].projector_to_matsubara_vec(sp_left, reduced_memory=True)
         if self._rank == 0:
             print("Generating projectors for right object...")
+            sys.stdout.flush()
+        if self._comm is not None:
+            self._comm.Barrier()
         prj_right = basis_dict[g_left.vertex].projector_to_matsubara_vec(sp_right, reduced_memory=True)
         vertex_result = g_left.vertex and g_right.vertex
         if self._rank == 0:
             print("vertex_result: ", vertex_result)
+            sys.stdout.flush()
+        if self._comm is not None:
+            self._comm.Barrier()
         prj = {True: self._prj_vertex, False: self._prj_G2}[vertex_result]
         Nl_result = {True: self._basis_vertex.Nl, False: self._basis_G2.Nl}[vertex_result]
+        if self._comm is not None:
+            self._comm.Barrier()
 
 
         assert g_left.No == g_right.No
@@ -214,10 +233,12 @@ def _multiply_LocalGf2CP_PH(Nw, num_w_inner, g_left, g_right, prj, prj_multiply_
     t1 = time.time()
     if verbose:
         print('Computing product of two objects...', end='')
+        sys.stdout.flush()
     y0, y1 = _innersum_LocalGf2CP_PH(Nw, num_w_inner, g_left, g_right, prj_multiply_PH_L, prj_multiply_PH_R)
     t2 = time.time()
     if verbose:
         print('done in {} seconds!'.format(t2-t1))
+        sys.stdout.flush()
 
     Nw, _, _ = prj[0].shape
     No = g_left.tensors[-1].shape[1]
