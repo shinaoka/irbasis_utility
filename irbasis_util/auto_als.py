@@ -67,11 +67,7 @@ class _AdjointMatrixLinearOperator(MatrixLinearOperator):
 
 class DiagonalLinearOperator(LinearOperator):
     """
-    Thin wrapper of scipy.sparse.linalg.LinearOperator
-
-    :param is_diagonal: Bool
-        Whether operator is diagonal or not.
-
+    Diagonal linear operator
     """
     def __init__(self, diagonals):
         diagonals = numpy.asarray(diagonals)
@@ -229,9 +225,6 @@ def _sum_ops(ops):
 
 def _identity_operator(N):
     return DiagonalLinearOperator(numpy.ones(N))
-
-def _is_matrix_operator(op):
-    return isinstance(op, MatrixLinearOperator)
 
 class LinearOperatorGenerator(object):
     """
@@ -408,7 +401,6 @@ class AutoALS:
 
     def _one_sweep(self, params, constants, verbose=False):
         # One sweep of ALS
-        # Shallow copy
         params_new = deepcopy(params)
         tensors_value = ChainMap(params_new, constants)
         for target_tensor in self._target_tensors:
