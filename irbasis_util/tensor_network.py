@@ -4,6 +4,9 @@ import numpy
 import opt_einsum as oe
 import time
 
+if oe.__version__ == 'v3.1.0':
+    raise RuntimeError("There is a bug in opt_einsum v3.1.0. Install a newer version!")
+
 _CHAR_LIST = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 
 def _to_letter(i):
