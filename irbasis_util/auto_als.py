@@ -92,6 +92,7 @@ class LeastSquaresOpGenerator(object):
 
         self._target_tensor = target_tensor
         self._comm = comm
+        self._rank = 0 if self._comm is None else self._comm.Get_rank()
         self._distributed = distributed
 
         # Tensor network for A
@@ -138,15 +139,19 @@ class LeastSquaresOpGenerator(object):
         if self._comm is not None:
             from mpi4py import MPI
 
-        #t1 = time.time()
+        t1 = time.time()
         op_array = self._A_tn.evaluate(tensors_value)
-        #t2 = time.time()
+        t2 = time.time()
         if self._distributed:
             recv = numpy.empty_like(op_array)
-            self._comm.Allreduce(op_array, recv, MPI.SUM)
-            op_array = recv
-        #t3 = time.time()
-        #print('const: ', t2-t1, t3-t2, op_array.shape)
+            self._comm.Reduce(op_array, recv, MPI.SUM, root=0)
+            if self._rank == 0:
+                op_array = recv
+            else:
+                op_array[...] = 0.0
+        t3 = time.time()
+        if self._rank == 0:
+            print('     contraction= ', t2-t1, ', Reduce= ', t3-t2)
         N = self._size
 
         if self._op_is_matrix:
@@ -402,22 +407,20 @@ class AutoALS:
                     # Solve Ax + y = 0 for x on master node
                     if isinstance(opA, numpy.ndarray) and opA.ndim == 1:
                         r = -vec_y/opA
-                        tensors_value[name][:] = r.reshape(tensors_value[name].shape)
                     elif isinstance(opA, numpy.ndarray) and opA.ndim == 2:
                         r = numpy.linalg.solve(opA, -vec_y)
-                        tensors_value[name][:] = r.reshape(tensors_value[name].shape)
                     else:
                         x0 = tensors_value[name].ravel()
                         if numpy.linalg.norm(vec_y - opA.matvec(x0)) > numpy.linalg.norm(vec_y):
                             x0 = None
-                        r = lgmres(opA, -vec_y, tol=1e-10, atol=0, x0=x0)
-                        tensors_value[name][:] = r[0].reshape(tensors_value[name].shape)
+                        r = lgmres(opA, -vec_y, tol=1e-10, atol=0, x0=x0)[0]
+                    tensors_value[name][:] = r.reshape(tensors_value[name].shape)
                 t4 = time.time()
                 if self._comm is not None:
                     self._comm.Barrier()
                     tensors_value[name][:] = self._comm.bcast(tensors_value[name], root=0)
                 if self._rank == 0:
-                    print(' timings: ', t2-t1, t3-t2, t4-t3)
+                    print(' timings: contruction of opA ', t2-t1, ' contruction of vecy= ', t3-t2, ' solve= ', t4-t3)
 
         return params_new
 
