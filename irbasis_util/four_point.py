@@ -7,7 +7,7 @@ from itertools import product, permutations
 from .internal import *
 from .two_point_basis import *
 
-from numba import njit, jit
+from numba import njit
 
 # FFF representations (#1-#4)
 idx_n1n2n3_FFF = list()
@@ -21,9 +21,9 @@ idx_n1n2n3_FFF = numpy.array(idx_n1n2n3_FFF)
 idx_n1n2n4_FBF = numpy.array([numpy.array((p[0], p[1], p[3])) for p in permutations([0, 1, 2, 3]) if p[0] < p[3]])
 
 @njit
-def _construct_coords(n1_n2_n3_n4_vec, o_fb):
+def _construct_coords(n1_n2_n3_n4_vec, o_fb, i_dtype):
     """
-    Construct conversion from 2pt frequencies to 1pt frequencies
+    Construct translation from 2pt frequencies to 1pt frequencies
     """
     nw = n1_n2_n3_n4_vec.shape[0]
 
@@ -36,7 +36,8 @@ def _construct_coords(n1_n2_n3_n4_vec, o_fb):
     for i in range(len(o_fb)):
         map_o[o_fb[i]-min_o] = i
 
-    coords = numpy.empty((3, nw, 16), dtype=numpy.int32)
+    coords = numpy.empty((3, nw, 16), dtype=i_dtype)
+
     for i in range(nw):
         nvec = n1_n2_n3_n4_vec[i, :]
 
@@ -194,7 +195,7 @@ class FourPoint(object):
         Unl_fb = numpy.vstack((Unl_f, Unl_b))
         o_fb = numpy.hstack((o_f, o_b))
 
-        coords = _construct_coords(n1_n2_n3_n4_vec, o_fb)
+        coords = _construct_coords(n1_n2_n3_n4_vec, o_fb, numpy.min_scalar_type(len(o_fb)))
 
         return Unl_fb, coords
 
