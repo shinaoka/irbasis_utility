@@ -163,14 +163,27 @@ class LeastSquaresOpGenerator(object):
 def _sum_ops(ops):
     # Sum of linear operators
     # If each operator is a matrix or diagonal and at least one operator is a matrix, evaluate the sum as a dense matrix.
+    # If all operators are diagonal, return diagonal elements.
     # Otherwise, construct a linear representing the sum.
     num_matrix_op = numpy.sum([isinstance(o, MatrixLinearOperator) for _, o in ops])
-    
-    if num_matrix_op > 0 and numpy.all([isinstance(o, MatrixLinearOperator) or isinstance(o, DiagonalLinearOperator) for _, o in ops]):
+    is_all_diagonal = numpy.all([isinstance(o, DiagonalLinearOperator) for _, o in ops])
+
+    def op_dtype():
         dtype = numpy.dtype(numpy.float64)
         for coeff, o in ops:
             dtype = numpy.promote_types(dtype, numpy.min_scalar_type(coeff))
             dtype = numpy.promote_types(dtype, o.dtype)
+        return dtype
+
+    if is_all_diagonal:
+        dtype = op_dtype()
+        N = ops[0][1].shape[0]
+        diagonals = numpy.zeros((N,), dtype=dtype)
+        for coeff, o in ops:
+            diagonals += coeff * o.diagonals
+        return diagonals
+    elif num_matrix_op > 0 and numpy.all([isinstance(o, MatrixLinearOperator) or isinstance(o, DiagonalLinearOperator) for _, o in ops]):
+        dtype = op_dtype()
         N = ops[0][1].shape[0]
         A = numpy.zeros((N, N), dtype=dtype)
         for coeff, o in ops:
@@ -387,7 +400,10 @@ class AutoALS:
                 #  Use numpy.linalg.solve() for a dense matrix
                 if self._rank == 0:
                     # Solve Ax + y = 0 for x on master node
-                    if isinstance(opA, numpy.ndarray):
+                    if isinstance(opA, numpy.ndarray) and opA.ndim == 1:
+                        r = -vec_y/opA
+                        tensors_value[name][:] = r.reshape(tensors_value[name].shape)
+                    elif isinstance(opA, numpy.ndarray) and opA.ndim == 2:
                         r = numpy.linalg.solve(opA, -vec_y)
                         tensors_value[name][:] = r.reshape(tensors_value[name].shape)
                     else:
