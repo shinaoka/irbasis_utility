@@ -36,6 +36,7 @@ parser.add_argument('--alpha', default=1e-8, type=float, help='regularization pa
 parser.add_argument('--scut', default=1e-4, type=float, help='Cutoff value for singular values')
 parser.add_argument('--vertex', default=False, action='store_true', help='Vertex or not')
 parser.add_argument('--restart', default=False, action='store_true', help='Restart')
+parser.add_argument('--num_threads', default=1, type=int, help='Number of threads for blas')
 
 args = parser.parse_args()
 if os.path.isfile(args.path_input_file) is False:
@@ -91,7 +92,7 @@ else:
     gf = LocalGf2CP(beta, Lambda, Nl, num_o, D, None, args.vertex)
 
 # Regression
-transform.fit_LocalGf2CP(gf, G2iwn_local.transpose(), args.niter, not args.restart, args.rtol, args.alpha, 1, args.seed)
+transform.fit_LocalGf2CP(gf, G2iwn_local.transpose(), args.niter, not args.restart, args.rtol, args.alpha, 1, args.seed, num_threads=args.num_threads)
 
 if is_master_node:
     with h5py.File(args.path_output_file, 'a') as hf:

@@ -7,7 +7,7 @@ from .tensor_network import Tensor, TensorNetwork, conj_a_b, differentiate, from
 from scipy.sparse.linalg import LinearOperator, lgmres, aslinearoperator
 import sys
 import time
-import ctypes
+from threadpoolctl import threadpool_info, threadpool_limits
 
 def _mpi_split(work_size, comm_size):
     base = work_size // comm_size
@@ -171,7 +171,7 @@ class AutoALS:
     """
     Automated alternating least squares fitting of tensor network
     """
-    def __init__(self, Y, tilde_Y, target_tensors, reg_L2=0.0, comm=None, distributed_subscript=None, mem_limit=1E+19, num_threads=None):
+    def __init__(self, Y, tilde_Y, target_tensors, reg_L2=0.0, comm=None, distributed_subscript=None, mem_limit=1E+19, num_threads=1):
         """
 
         :param Y: a list of TensorNetwork
@@ -192,7 +192,7 @@ class AutoALS:
         :param mem_limit: Integer
             mememory limit for einsum_path. 1E+8 * 16 Byte = 1.6 GB
         :param num_threads: Integer
-            Number of threads set for MKL backend of numpy when solving linear systems.
+            Number of threads set for blas backend of numpy when solving linear systems.
         """
 
         if isinstance(Y, TensorNetwork):
@@ -260,19 +260,7 @@ class AutoALS:
         self._target_tensor_names = set([t.name for t in self._target_tensors])
         self._reg_L2 = reg_L2
 
-        # TODO: Add support for OpenBlas
-        if num_threads is not None:
-            self._mkl_rt = ctypes.CDLL('libmkl_rt.so')
-            self._dynamic_threading = True
-            self._num_threads = num_threads
-        else:
-            self._mkl_rt = None
-            self._dynamic_threading = False
-            self._num_threads = None
-
-    def _set_num_threads(self, num_threads):
-        assert self._dynamic_threading
-        self._mkl_rt.mkl_set_num_threads(ctypes.byref(ctypes.c_int(num_threads)))
+        self._num_threads = num_threads
 
     def squared_error(self, tensors_value):
         """
@@ -310,40 +298,33 @@ class AutoALS:
         params_new = deepcopy(params)
         tensors_value = ChainMap(params_new, constants)
         for target_tensor in self._target_tensors:
-            # Disable multithreading in numpy
-            if self._dynamic_threading:
-                self._set_num_threads(1)
+            # Disable multithreading in blas
+            with threadpool_limits(limits=1, user_api='blas'):
+                name = target_tensor.name
+                t1 = time.time()
+                opA = self._A_generators[name].construct(tensors_value)
+                t2 = time.time()
+                vec_y = self._y_generators[name].construct(tensors_value)
+                t3 = time.time()
 
-            name = target_tensor.name
-            t1 = time.time()
-            opA = self._A_generators[name].construct(tensors_value)
-            t2 = time.time()
-            vec_y = self._y_generators[name].construct(tensors_value)
-            t3 = time.time()
-
-            # Enable multithreading in numpy
-            if self._dynamic_threading:
-                self._set_num_threads(self._num_threads)
-                if verbose:
-                    print('Setting num_threads = {} for numpy.'.format(self._num_threads))
-
-            # Solve the linear system
-            # FIXME: Is A a hermitian?
-            x0 = tensors_value[name].ravel()
-            if numpy.linalg.norm(vec_y - opA.matvec(x0)) > numpy.linalg.norm(vec_y):
-                x0 = None
-            if self._rank == 0:
-                # Solve only on master node
-                r = lgmres(opA, vec_y, tol=1e-10, atol=0, x0=x0)
-                tensors_value[name][:] = r[0].reshape(tensors_value[name].shape)
-            t4 = time.time()
-            if self._comm is not None:
-                self._comm.Barrier()
-                tensors_value[name][:] = self._comm.bcast(tensors_value[name], root=0)
-
-            # Disable multithreading in numpy
-            if self._dynamic_threading:
-                self._set_num_threads(1)
+            # Enable multithreading in blas
+            with threadpool_limits(limits=self._num_threads, user_api='blas'):
+                # Solve the linear system
+                # TODO: Use numpy.linalg.solve() for a dense matrix
+                #     (direct solver is more efficient in this case).
+                if self._rank == 0:
+                    x0 = tensors_value[name].ravel()
+                    if numpy.linalg.norm(vec_y - opA.matvec(x0)) > numpy.linalg.norm(vec_y):
+                        x0 = None
+                    # Solve only on master node
+                    r = lgmres(opA, vec_y, tol=1e-10, atol=0, x0=x0)
+                    tensors_value[name][:] = r[0].reshape(tensors_value[name].shape)
+                t4 = time.time()
+                if self._comm is not None:
+                    self._comm.Barrier()
+                    tensors_value[name][:] = self._comm.bcast(tensors_value[name], root=0)
+                if self._rank == 0:
+                    print(' timings: ', t2-t1, t3-t2, t4-t3)
 
         return params_new
 

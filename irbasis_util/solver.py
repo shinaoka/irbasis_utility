@@ -124,7 +124,7 @@ class FourPointBasisTransform:
             self._prj_G2 = [self._prj_vertex[imat][:, :, 1:] for imat in range(3)]
 
 
-    def fit_LocalGf2CP(self, g, data_sp, niter, random_init=True, rtol=1e-8, alpha=1e-8, verbose=1, seed=100):
+    def fit_LocalGf2CP(self, g, data_sp, niter, random_init=True, rtol=1e-8, alpha=1e-8, verbose=1, seed=100, num_threads=1):
         assert data_sp.shape[0] == self._n_sp_local
 
         # Find non-zero orbital components
@@ -138,7 +138,7 @@ class FourPointBasisTransform:
         D = g.D
 
         tensors = fit(data_sp[:, orb_idx], prj, D, niter, rtol, verbose=verbose,
-                 random_init=random_init, comm=self._comm, seed=seed, alpha=alpha, nesterov=True, x0=x0)
+                 random_init=random_init, comm=self._comm, seed=seed, alpha=alpha, nesterov=True, x0=x0, num_threads=num_threads)
 
         for i in range(4):
             g.tensors[i][:] = tensors[i][:]
