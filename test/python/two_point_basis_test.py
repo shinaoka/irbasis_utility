@@ -72,16 +72,6 @@ class TestMethods(unittest.TestCase):
                 unl = b.compute_unl(n)
                 self.assertTrue(numpy.allclose(Unl, numpy.sqrt(beta) * unl, 1e-10))
 
-    def test_sampling_points_tau(self):
-        for stat in all_stat:
-            with self.subTest('stat = %s' % (stat)):
-                b, B = load_basis(stat, Lambda, beta)
-                dim = B.dim
-                whichl = dim -1
-                taus, w = sampling_points_leggauss(B, whichl, deg=10)
-
-                self.assertAlmostEqual(numpy.sum(w), beta, delta=1e-10)
-
     def test_extended_basis(self):
         nvec = numpy.arange(-10, 10)
         num_n = len(nvec)
