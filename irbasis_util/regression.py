@@ -6,16 +6,16 @@ import scipy.linalg
 from scipy.sparse.linalg import lsqr
 
 def ridge_svd(X, y, alpha, cutoff = 1e-10):
-    N1, N2 = X.shape
     U, s, Vt = scipy.linalg.svd(X, full_matrices=False)
+
     Nm = s.size
     idx = s > cutoff * s[0]
     s_nnz = s[idx][:, numpy.newaxis]
-    UTy = numpy.dot(U.T, y)
+    UTy = numpy.dot(numpy.conj(U.T), y)
     d = numpy.zeros((Nm,1), dtype=X.dtype)
     d[idx] = s_nnz / (s_nnz ** 2 + alpha)
     d_UT_y = d.reshape((Nm,)) * UTy.reshape((Nm,))
-    return numpy.dot(Vt.T, d_UT_y)
+    return numpy.dot(numpy.conj(Vt.T), d_UT_y)
 
 def ridge_coordinate_descent(X, y, alpha, blocks = [], rtol = 1e-8, cutoff = 1e-10):
     N1, N2 = X.shape
@@ -104,20 +104,22 @@ def ridge_lsqr(A, y, alpha, tol=1e-10, precond=None, x0=None, verbose=0):
 
 def ridge_complex(A, y, alpha, solver='svd', x0 = None, precond = None, tol=1e-12, verbose=0):
     (N1, N2) = A.shape
+    assert len(y) == N1
+
     A_big = numpy.zeros((2,N1,2,N2), dtype=float)
     A_big[0,:,0,:] =  A.real
     A_big[0,:,1,:] = -A.imag
     A_big[1,:,0,:] =  A.imag
     A_big[1,:,1,:] =  A.real
 
-    assert len(y) == N1
     y_big = numpy.zeros((2,N1), dtype=float)
     y_big[0,:] = y.real
     y_big[1,:] = y.imag
     
     if solver == 'svd':
-        coef = ridge_svd(A_big.reshape((2*N1, 2*N2)), y_big.reshape((2*N1)), alpha)
+        return ridge_svd(A, y, alpha)
     elif solver == 'lsqr':
+        # FIXME: Actually, lsqrt supports complex matrices. Remove *_big things.
         if x0 is None:
             x0_big = None
         else:
@@ -137,8 +139,8 @@ def ridge_complex(A, y, alpha, solver='svd', x0 = None, precond = None, tol=1e-1
             precond_big[1, :] = precond
             precond_big = precond_big.reshape((2*N2,))
         coef = ridge_lsqr(A_big.reshape((2*N1, 2*N2)), y_big.reshape((2*N1)), alpha, precond=precond_big, x0=x0_big, tol=tol, verbose=verbose)
+        coef = coef.reshape((2,N2))
+        return coef[0,:] + 1J * coef[1,:]
     else:
         raise RuntimeError("Uknown solver: " + solver)
 
-    coef = coef.reshape((2,N2))
-    return coef[0,:] + 1J * coef[1,:]
