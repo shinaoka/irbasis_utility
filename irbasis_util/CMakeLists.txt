@@ -1,7 +1,7 @@
 # Copy files into a build directories
 set(script_files __init__.py two_point_basis.py three_point.py four_point.py
-four_point_ph_view.py regression.py internal.py tensor_regression.py lsqr.py
-tensor_regression_mps.py tensor_network.py auto_als.py tensor_regression_auto_als.py
+four_point_ph_view.py regression.py internal.py 
+tensor_network.py auto_als.py tensor_regression_auto_als.py
 gf.py
 solver.py
 )

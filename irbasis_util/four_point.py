@@ -164,7 +164,7 @@ class FourPoint(object):
         Compute projector from IR to Matsubara.
 
         :param n1_n2_n3_n4_vec: array like
-             List of frequencies in fermionic convention
+             List of frequencies in fermionic convention of shape (Nw, 4)
         :return:  Unl_fb [(Nw_1pt, Nl)] and coords [(3, Nw, 16)]
              Nw_pt is the number of 1pt frequencies.
              coords denotes translation from 2pt frequencies to 1pt frequencies.
@@ -173,10 +173,11 @@ class FourPoint(object):
         """
         n1_n2_n3_n4_vec = numpy.asarray(n1_n2_n3_n4_vec)
 
+        if not numpy.all(numpy.sum(n1_n2_n3_n4_vec, axis=1) + 2 == 0):
+            raise RuntimeError("Energy conservation law for frequencies is violated!")
+
         assert numpy.amax(n1_n2_n3_n4_vec) <= numpy.iinfo(numpy.int64).max
         assert numpy.amin(n1_n2_n3_n4_vec) >= numpy.iinfo(numpy.int64).min
-
-        nw = n1_n2_n3_n4_vec.shape[0]
 
         # All unique fermionic frequencies for the one-particle basis
         n_f = numpy.unique(numpy.hstack((n1_n2_n3_n4_vec, -n1_n2_n3_n4_vec - 1)))

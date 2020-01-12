@@ -35,10 +35,11 @@ def find_zeros(ulx):
     eps = 1e-14
     tvec = numpy.linspace(-3, 3, Nx) #3 is a very safe option.
     xvec = numpy.tanh(0.5*numpy.pi*numpy.sinh(tvec))
+    ulx_vec = ulx(xvec)
 
     zeros = []
     for i in range(Nx-1):
-        if ulx(xvec[i]) * ulx(xvec[i+1]) < 0:
+        if ulx_vec[i] * ulx_vec[i+1] < 0:
             a = xvec[i+1]
             b = xvec[i]
             u_a = ulx(a)

@@ -8,9 +8,7 @@ import irbasis
 from irbasis_util.two_point_basis import *
 from irbasis_util.internal import *
 from irbasis_util.regression import *
-from irbasis_util.tensor_regression import predict
-from irbasis_util.tensor_regression_auto_als import fit
-#from irbasis_util.tensor_regression import fit
+from irbasis_util.tensor_regression_auto_als import fit, predict
 
 class TestMethods(unittest.TestCase):
     def __init__(self, *args, **kwargs):
